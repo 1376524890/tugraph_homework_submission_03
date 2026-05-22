@@ -8,12 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from neo4j import GraphDatabase
-from neo4j.exceptions import Neo4jError
-
-
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = ROOT / "data" / "raw" / "Dataset-Unicauca-Version2-87Atts.csv"
+PROCESSED_ROOT = ROOT / "data" / "processed"
+HCG_PROCESSED_DIR = PROCESSED_ROOT / "hcg"
+TCG_PROCESSED_DIR = PROCESSED_ROOT / "tcg"
 
 
 def load_dotenv(path: Path | None = None) -> None:
@@ -87,10 +86,30 @@ def read_rows(path: Path, max_rows: int | None = None) -> Iterator[tuple[int, di
                 break
 
 
+def read_dict_csv(path: Path) -> Iterator[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.DictReader(fh)
+        yield from reader
+
+
+def write_dict_csv(path: Path, fieldnames: list[str], rows: Iterable[dict[str, Any]]) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    count = 0
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: row.get(name, "") for name in fieldnames})
+            count += 1
+    return count
+
+
 def safe_call(session, query: str, **params: Any) -> None:
     try:
         list(session.run(query, **params))
-    except Neo4jError as exc:
+    except Exception as exc:
+        if not exc.__class__.__module__.startswith("neo4j"):
+            raise
         message = str(exc).lower()
         if "already" in message or "exist" in message or "same name" in message:
             return
@@ -98,6 +117,8 @@ def safe_call(session, query: str, **params: Any) -> None:
 
 
 def ensure_graph(uri: str, user: str, password: str, graph: str) -> None:
+    from neo4j import GraphDatabase
+
     driver = GraphDatabase.driver(uri, auth=(user, password))
     try:
         with driver.session(database="default") as session:
@@ -110,6 +131,8 @@ def ensure_graph(uri: str, user: str, password: str, graph: str) -> None:
 
 def run_schema(uri: str, user: str, password: str, graph: str, schemas: list[dict[str, Any]]) -> None:
     ensure_graph(uri, user, password, graph)
+    from neo4j import GraphDatabase
+
     driver = GraphDatabase.driver(uri, auth=(user, password))
     try:
         with driver.session(database=graph) as session:

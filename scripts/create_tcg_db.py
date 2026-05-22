@@ -7,8 +7,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from neo4j import GraphDatabase
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tugraph_homework.common import (  # noqa: E402
@@ -16,10 +14,13 @@ from tugraph_homework.common import (  # noqa: E402
     DEFAULT_PASSWORD,
     DEFAULT_URI,
     DEFAULT_USER,
+    TCG_PROCESSED_DIR,
+    batched,
     endpoint_id,
     parse_float,
     parse_int,
     parse_timestamp,
+    read_dict_csv,
     read_rows,
     run_schema,
     safe_call,
@@ -29,6 +30,24 @@ from tugraph_homework.common import (  # noqa: E402
 
 
 GRAPH = "tcg"
+TCG_FLOW_FIELDS = [
+    "record_id",
+    "flow_id",
+    "src_endpoint",
+    "dst_endpoint",
+    "protocol",
+    "timestamp",
+    "timestamp_epoch",
+    "duration",
+    "fwd_packets",
+    "bwd_packets",
+    "fwd_bytes",
+    "bwd_bytes",
+    "label",
+    "l7_protocol",
+    "protocol_name",
+]
+TCG_EDGE_FIELDS = ["source_id", "target_id", "relation_id", "shared_endpoint", "delta_seconds", "rule"]
 
 
 SCHEMAS: list[dict[str, Any]] = [
@@ -131,22 +150,99 @@ def causal_edges(
     return edges
 
 
+def flow_from_csv(row: dict[str, str]) -> dict[str, Any]:
+    return {
+        "record_id": row["record_id"],
+        "flow_id": row.get("flow_id", ""),
+        "src_endpoint": row["src_endpoint"],
+        "dst_endpoint": row["dst_endpoint"],
+        "protocol": parse_int(row.get("protocol", "0")),
+        "timestamp": row.get("timestamp", ""),
+        "timestamp_epoch": parse_int(row.get("timestamp_epoch", "0")),
+        "duration": parse_float(row.get("duration", "0")),
+        "fwd_packets": parse_int(row.get("fwd_packets", "0")),
+        "bwd_packets": parse_int(row.get("bwd_packets", "0")),
+        "fwd_bytes": parse_int(row.get("fwd_bytes", "0")),
+        "bwd_bytes": parse_int(row.get("bwd_bytes", "0")),
+        "label": row.get("label", ""),
+        "l7_protocol": parse_int(row.get("l7_protocol", "0")),
+        "protocol_name": row.get("protocol_name", ""),
+    }
+
+
+def edge_from_csv(row: dict[str, str]) -> dict[str, Any]:
+    return {
+        "source_id": row["source_id"],
+        "target_id": row["target_id"],
+        "relation_id": row["relation_id"],
+        "shared_endpoint": row["shared_endpoint"],
+        "delta_seconds": parse_int(row.get("delta_seconds", "0")),
+        "rule": row.get("rule", ""),
+    }
+
+
+def processed_paths(processed_dir: Path) -> tuple[Path, Path]:
+    return processed_dir / "flows.csv", processed_dir / "causes.csv"
+
+
+def import_processed(args: argparse.Namespace) -> None:
+    flow_path, edge_path = processed_paths(args.processed_dir)
+    if not flow_path.exists() or not edge_path.exists():
+        raise FileNotFoundError(f"Processed TCG CSV files not found in {args.processed_dir}. Run scripts/prepare_processed_csv.py --graph tcg first.")
+
+    run_schema(args.uri, args.user, args.password, args.graph, SCHEMAS)
+    from neo4j import GraphDatabase
+
+    driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
+    flow_count = 0
+    edge_count = 0
+    try:
+        with driver.session(database=args.graph) as session:
+            safe_call(session, "CALL db.addEdgeIndex('CAUSES', 'relation_id', false, true)")
+            for batch in batched((flow_from_csv(row) for row in read_dict_csv(flow_path)), args.batch_size):
+                upsert_vertices(session, "Flow", batch)
+                flow_count += len(batch)
+                if flow_count % 500_000 == 0:
+                    print(f"flow_vertices_written={flow_count}", flush=True)
+            for batch in batched((edge_from_csv(row) for row in read_dict_csv(edge_path)), args.batch_size):
+                upsert_edges(session, "CAUSES", "Flow", "source_id", "Flow", "target_id", batch, "relation_id")
+                edge_count += len(batch)
+                if edge_count % 500_000 == 0:
+                    print(f"causal_edges_written={edge_count}", flush=True)
+            counts = [dict(row) for row in session.run("CALL dbms.meta.countDetail()")]
+            print(counts)
+            print(f"flow_vertices_written={flow_count}")
+            print(f"causal_edges_written={edge_count}")
+    finally:
+        driver.close()
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create and populate the Traffic Causality Graph (TCG) in TuGraph.")
-    parser.add_argument("--csv", type=Path, default=DEFAULT_DATASET)
+    parser = argparse.ArgumentParser(description="Create and populate the Traffic Causality Graph (TCG) in TuGraph from processed CSV files.")
+    parser.add_argument("--processed-dir", type=Path, default=TCG_PROCESSED_DIR)
+    parser.add_argument("--direct-csv", type=Path, default=None, help="Bypass processed CSV files and import directly from a raw CSV.")
     parser.add_argument("--uri", default=DEFAULT_URI)
     parser.add_argument("--user", default=DEFAULT_USER)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
     parser.add_argument("--graph", default=GRAPH)
     parser.add_argument("--batch-size", type=int, default=2000)
-    parser.add_argument("--max-rows", type=int, default=None)
-    parser.add_argument("--window-seconds", type=int, default=60)
-    parser.add_argument("--max-predecessors", type=int, default=3)
+    parser.add_argument("--max-rows", type=int, default=None, help="Only applies with --direct-csv.")
+    parser.add_argument("--window-seconds", type=int, default=60, help="Only applies with --direct-csv.")
+    parser.add_argument("--max-predecessors", type=int, default=3, help="Only applies with --direct-csv.")
     args = parser.parse_args()
     if not args.user or not args.password:
         parser.error("TuGraph credentials are required. Set TUGRAPH_USER/TUGRAPH_PASSWORD in .env or pass --user/--password.")
 
+    if not args.direct_csv:
+        try:
+            import_processed(args)
+        except FileNotFoundError as exc:
+            parser.error(str(exc))
+        return
+
     run_schema(args.uri, args.user, args.password, args.graph, SCHEMAS)
+    from neo4j import GraphDatabase
+
     driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
     histories: dict[str, collections.deque[dict[str, Any]]] = collections.defaultdict(collections.deque)
     flow_batch: list[dict[str, Any]] = []
@@ -156,7 +252,7 @@ def main() -> None:
     try:
         with driver.session(database=args.graph) as session:
             safe_call(session, "CALL db.addEdgeIndex('CAUSES', 'relation_id', false, true)")
-            for row_number, row in read_rows(args.csv, max_rows=args.max_rows):
+            for row_number, row in read_rows(args.direct_csv or DEFAULT_DATASET, max_rows=args.max_rows):
                 current = flow_vertex(row_number, row)
                 flow_batch.append(current)
                 edge_batch.extend(causal_edges(current, histories, args.window_seconds, args.max_predecessors))

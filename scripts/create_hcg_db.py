@@ -7,8 +7,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from neo4j import GraphDatabase
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tugraph_homework.common import (  # noqa: E402
@@ -16,11 +14,13 @@ from tugraph_homework.common import (  # noqa: E402
     DEFAULT_PASSWORD,
     DEFAULT_URI,
     DEFAULT_USER,
+    HCG_PROCESSED_DIR,
     batched,
     endpoint_id,
     parse_float,
     parse_int,
     parse_timestamp,
+    read_dict_csv,
     read_rows,
     run_schema,
     upsert_edges,
@@ -29,6 +29,20 @@ from tugraph_homework.common import (  # noqa: E402
 
 
 GRAPH = "hcg"
+HCG_ENDPOINT_FIELDS = ["endpoint_id", "ip", "port"]
+HCG_EDGE_FIELDS = [
+    "source_id",
+    "target_id",
+    "flow_count",
+    "first_seen",
+    "last_seen",
+    "protocol_names",
+    "total_fwd_packets",
+    "total_bwd_packets",
+    "total_fwd_bytes",
+    "total_bwd_bytes",
+    "avg_duration",
+]
 
 
 SCHEMAS: list[dict[str, Any]] = [
@@ -121,28 +135,68 @@ def build_hcg_rows(csv_path: Path, max_rows: int | None) -> tuple[dict[str, dict
     return endpoints, edges
 
 
+def hcg_endpoint_from_csv(row: dict[str, str]) -> dict[str, Any]:
+    return {
+        "endpoint_id": row["endpoint_id"],
+        "ip": row["ip"],
+        "port": parse_int(row.get("port", "0")),
+    }
+
+
+def hcg_edge_from_csv(row: dict[str, str]) -> dict[str, Any]:
+    return {
+        "source_id": row["source_id"],
+        "target_id": row["target_id"],
+        "flow_count": parse_int(row.get("flow_count", "0")),
+        "first_seen": row.get("first_seen", ""),
+        "last_seen": row.get("last_seen", ""),
+        "protocol_names": row.get("protocol_names", ""),
+        "total_fwd_packets": parse_int(row.get("total_fwd_packets", "0")),
+        "total_bwd_packets": parse_int(row.get("total_bwd_packets", "0")),
+        "total_fwd_bytes": parse_int(row.get("total_fwd_bytes", "0")),
+        "total_bwd_bytes": parse_int(row.get("total_bwd_bytes", "0")),
+        "avg_duration": parse_float(row.get("avg_duration", "0")),
+    }
+
+
+def processed_paths(processed_dir: Path) -> tuple[Path, Path]:
+    return processed_dir / "endpoints.csv", processed_dir / "communicates.csv"
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create and populate the Host Communication Graph (HCG) in TuGraph.")
-    parser.add_argument("--csv", type=Path, default=DEFAULT_DATASET)
+    parser = argparse.ArgumentParser(description="Create and populate the Host Communication Graph (HCG) in TuGraph from processed CSV files.")
+    parser.add_argument("--processed-dir", type=Path, default=HCG_PROCESSED_DIR)
+    parser.add_argument("--direct-csv", type=Path, default=None, help="Bypass processed CSV files and import directly from a raw CSV.")
     parser.add_argument("--uri", default=DEFAULT_URI)
     parser.add_argument("--user", default=DEFAULT_USER)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
     parser.add_argument("--graph", default=GRAPH)
     parser.add_argument("--batch-size", type=int, default=5000)
-    parser.add_argument("--max-rows", type=int, default=None)
+    parser.add_argument("--max-rows", type=int, default=None, help="Only applies with --direct-csv.")
     args = parser.parse_args()
     if not args.user or not args.password:
         parser.error("TuGraph credentials are required. Set TUGRAPH_USER/TUGRAPH_PASSWORD in .env or pass --user/--password.")
 
     run_schema(args.uri, args.user, args.password, args.graph, SCHEMAS)
-    endpoints, edges = build_hcg_rows(args.csv, args.max_rows)
+    if args.direct_csv:
+        endpoints, edges = build_hcg_rows(args.direct_csv or DEFAULT_DATASET, args.max_rows)
+        endpoint_rows: Iterable[dict[str, Any]] = endpoints.values()
+        edge_rows: Iterable[dict[str, Any]] = edges.values()
+    else:
+        endpoint_path, edge_path = processed_paths(args.processed_dir)
+        if not endpoint_path.exists() or not edge_path.exists():
+            parser.error(f"Processed HCG CSV files not found in {args.processed_dir}. Run scripts/prepare_processed_csv.py --graph hcg first.")
+        endpoint_rows = (hcg_endpoint_from_csv(row) for row in read_dict_csv(endpoint_path))
+        edge_rows = (hcg_edge_from_csv(row) for row in read_dict_csv(edge_path))
+
+    from neo4j import GraphDatabase
 
     driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
     try:
         with driver.session(database=args.graph) as session:
-            for batch in batched(endpoints.values(), args.batch_size):
+            for batch in batched(endpoint_rows, args.batch_size):
                 upsert_vertices(session, "Endpoint", batch)
-            for batch in batched(edges.values(), args.batch_size):
+            for batch in batched(edge_rows, args.batch_size):
                 upsert_edges(session, "COMMUNICATES", "Endpoint", "source_id", "Endpoint", "target_id", batch)
             counts = [dict(row) for row in session.run("CALL dbms.meta.countDetail()")]
             print(counts)
