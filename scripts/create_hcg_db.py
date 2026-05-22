@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """创建并导入 HCG TuGraph 子图。
 
-本脚本负责创建 Endpoint/COMMUNICATES schema，并把已生成的 HCG CSV 导入
-TuGraph；也保留小规模 direct-csv 导入能力用于验证。
+本脚本通过 Bolt 创建 Endpoint/COMMUNICATES schema，并把 HCG 中间 CSV
+endpoints.csv 和 communicates.csv 导入 TuGraph。
 """
 
 from __future__ import annotations
@@ -15,20 +15,19 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tugraph_homework.common import (  # noqa: E402
-    DEFAULT_DATASET,
     DEFAULT_PASSWORD,
+    ROOT,
     DEFAULT_URI,
     DEFAULT_USER,
-    HCG_PROCESSED_DIR,
     batched,
     parse_float,
     parse_int,
+    progress_bar,
     read_dict_csv,
     run_schema,
     upsert_edges,
     upsert_vertices,
 )
-from tugraph_homework.transform import HCG_EDGE_FIELDS, HCG_ENDPOINT_FIELDS, build_hcg_rows  # noqa: E402
 
 
 GRAPH = "hcg"
@@ -132,30 +131,23 @@ def processed_paths(processed_dir: Path) -> tuple[Path, Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create and populate the Host Communication Graph (HCG) in TuGraph from processed CSV files.")
-    parser.add_argument("--processed-dir", type=Path, default=HCG_PROCESSED_DIR)
-    parser.add_argument("--direct-csv", type=Path, default=None, help="Bypass processed CSV files and import directly from a raw CSV.")
+    parser.add_argument("--processed-dir", type=Path, default=ROOT / "data" / "rebuild" / "hcg")
     parser.add_argument("--uri", default=DEFAULT_URI)
     parser.add_argument("--user", default=DEFAULT_USER)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
     parser.add_argument("--graph", default=GRAPH)
     parser.add_argument("--batch-size", type=int, default=5000)
-    parser.add_argument("--max-rows", type=int, default=None, help="Only applies with --direct-csv.")
     parser.add_argument("--progress-interval", type=int, default=500_000, help="Print import progress after this many written rows.")
     args = parser.parse_args()
     if not args.user or not args.password:
         parser.error("TuGraph credentials are required. Set TUGRAPH_USER/TUGRAPH_PASSWORD in .env or pass --user/--password.")
 
     run_schema(args.uri, args.user, args.password, args.graph, SCHEMAS)
-    if args.direct_csv:
-        endpoints, edges = build_hcg_rows(args.direct_csv or DEFAULT_DATASET, args.max_rows)
-        endpoint_rows: Iterable[dict[str, Any]] = endpoints.values()
-        edge_rows: Iterable[dict[str, Any]] = edges.values()
-    else:
-        endpoint_path, edge_path = processed_paths(args.processed_dir)
-        if not endpoint_path.exists() or not edge_path.exists():
-            parser.error(f"Processed HCG CSV files not found in {args.processed_dir}. Run scripts/prepare_processed_csv.py --graph hcg first.")
-        endpoint_rows = (hcg_endpoint_from_csv(row) for row in read_dict_csv(endpoint_path))
-        edge_rows = (hcg_edge_from_csv(row) for row in read_dict_csv(edge_path))
+    endpoint_path, edge_path = processed_paths(args.processed_dir)
+    if not endpoint_path.exists() or not edge_path.exists():
+        parser.error(f"HCG CSV files not found in {args.processed_dir}. Run scripts/prepare_processed_csv.py --graph hcg --output-root data/rebuild first.")
+    endpoint_rows = (hcg_endpoint_from_csv(row) for row in read_dict_csv(endpoint_path))
+    edge_rows = (hcg_edge_from_csv(row) for row in read_dict_csv(edge_path))
 
     from neo4j import GraphDatabase
 
@@ -164,16 +156,30 @@ def main() -> None:
     edge_count = 0
     try:
         with driver.session(database=args.graph) as session:
-            for batch in batched(endpoint_rows, args.batch_size):
-                upsert_vertices(session, "Endpoint", batch)
-                endpoint_count += len(batch)
-                if args.progress_interval > 0 and endpoint_count % args.progress_interval == 0:
-                    print(f"endpoint_vertices_written={endpoint_count}", flush=True)
-            for batch in batched(edge_rows, args.batch_size):
-                upsert_edges(session, "COMMUNICATES", "Endpoint", "source_id", "Endpoint", "target_id", batch)
-                edge_count += len(batch)
-                if args.progress_interval > 0 and edge_count % args.progress_interval == 0:
-                    print(f"communicates_edges_written={edge_count}", flush=True)
+            endpoint_bar = progress_bar("import HCG endpoints", "rows")
+            try:
+                for batch in batched(endpoint_rows, args.batch_size):
+                    upsert_vertices(session, "Endpoint", batch)
+                    endpoint_count += len(batch)
+                    if endpoint_bar is not None:
+                        endpoint_bar.update(len(batch))
+                    if args.progress_interval > 0 and endpoint_count % args.progress_interval == 0:
+                        print(f"endpoint_vertices_written={endpoint_count}", flush=True)
+            finally:
+                if endpoint_bar is not None:
+                    endpoint_bar.close()
+            edge_bar = progress_bar("import HCG edges", "rows")
+            try:
+                for batch in batched(edge_rows, args.batch_size):
+                    upsert_edges(session, "COMMUNICATES", "Endpoint", "source_id", "Endpoint", "target_id", batch)
+                    edge_count += len(batch)
+                    if edge_bar is not None:
+                        edge_bar.update(len(batch))
+                    if args.progress_interval > 0 and edge_count % args.progress_interval == 0:
+                        print(f"communicates_edges_written={edge_count}", flush=True)
+            finally:
+                if edge_bar is not None:
+                    edge_bar.close()
             counts = [dict(row) for row in session.run("CALL dbms.meta.countDetail()")]
             print(counts)
             print(f"endpoint_vertices_written={endpoint_count}")

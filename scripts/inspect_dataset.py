@@ -30,7 +30,7 @@ def main() -> None:
     with args.csv.open(newline="", encoding="utf-8", errors="replace") as fh:
         reader = csv.DictReader(fh)
         columns = reader.fieldnames or []
-    for row_count, row in read_rows(args.csv):
+    for row_count, row in read_rows(args.csv, progress_desc="inspect rows"):
         endpoints.add(endpoint_id(row["Source.IP"], row["Source.Port"]))
         endpoints.add(endpoint_id(row["Destination.IP"], row["Destination.Port"]))
         flow_ids.add(row["Flow.ID"])

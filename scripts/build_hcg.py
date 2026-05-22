@@ -36,8 +36,8 @@ def main() -> None:
     edge_tmp = edge_path.with_suffix(".csv.tmp")
 
     endpoints, edges = build_hcg_rows(args.input, args.max_rows)
-    endpoint_count = write_dict_csv(endpoint_tmp, HCG_ENDPOINT_FIELDS, endpoints.values())
-    edge_count = write_dict_csv(edge_tmp, HCG_EDGE_FIELDS, edges.values())
+    endpoint_count = write_dict_csv(endpoint_tmp, HCG_ENDPOINT_FIELDS, endpoints.values(), progress_desc="write HCG endpoints", total=len(endpoints))
+    edge_count = write_dict_csv(edge_tmp, HCG_EDGE_FIELDS, edges.values(), progress_desc="write HCG edges", total=len(edges))
     replace_tmp(endpoint_tmp, endpoint_path)
     replace_tmp(edge_tmp, edge_path)
 

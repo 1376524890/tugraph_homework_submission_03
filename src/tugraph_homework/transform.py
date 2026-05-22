@@ -1,8 +1,7 @@
 """图构建公共转换函数。
 
 本文件包含 HCG 端点/通信边字段生成、Flow 记录标准化、TCG 的 CR/PR/DHR/SHR
-关系判定、边方向确定和稳定 relation_id 生成逻辑。旧版
-shared_endpoint_time_window 构图入口在这里被显式禁用，避免误用。
+关系判定、边方向确定和稳定 relation_id 生成逻辑。
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from tugraph_homework.common import endpoint_id, parse_float, parse_int, parse_timestamp, read_rows
+from tugraph_homework.common import endpoint_id, parse_float, parse_int, parse_timestamp, progress_iter, read_rows
 
 
 COMMON_SERVICE_PORTS = {20, 21, 22, 23, 25, 53, 80, 110, 143, 443, 993, 995, 3128, 8080}
@@ -151,7 +150,7 @@ def get_first(row: dict[str, str], names: tuple[str, ...], default: str = "") ->
 
 
 def normalized_endpoints(row: dict[str, str]) -> tuple[str, int, str, int, str, str]:
-    # 兼容两类输入：原始数据的 Source/Destination 字段，以及已标准化的 src/dst 字段。
+    # 支持原始数据的 Source/Destination 字段，也支持已标准化的 src/dst 字段。
     src_ip = get_first(row, ("src_ip", "Source.IP"))
     dst_ip = get_first(row, ("dst_ip", "Destination.IP"))
     src_port_text = get_first(row, ("src_port", "Source.Port"))
@@ -205,7 +204,7 @@ def build_hcg_rows(csv_path: Path, max_rows: int | None) -> tuple[dict[str, dict
     protocol_counts: dict[tuple[str, str], collections.Counter[int]] = collections.defaultdict(collections.Counter)
     protocol_name_counts: dict[tuple[str, str], collections.Counter[str]] = collections.defaultdict(collections.Counter)
 
-    for row_number, row in read_rows(csv_path, max_rows=max_rows):
+    for row_number, row in read_rows(csv_path, max_rows=max_rows, progress_desc="aggregate HCG rows"):
         src_ip, src_port, dst_ip, dst_port, src, dst = normalized_endpoints(row)
         endpoints.setdefault(src, endpoint_row(src_ip, src_port))
         endpoints.setdefault(dst, endpoint_row(dst_ip, dst_port))
@@ -264,7 +263,7 @@ def build_hcg_rows(csv_path: Path, max_rows: int | None) -> tuple[dict[str, dict
         if row_number % 500_000 == 0:
             print(f"aggregated_rows={row_number} endpoints={len(endpoints)} edges={len(edges)}", flush=True)
 
-    for key, edge in edges.items():
+    for key, edge in progress_iter(edges.items(), "finalize HCG edges", "edges", len(edges)):
         edge["total_packets"] = edge["total_fwd_packets"] + edge["total_bwd_packets"]
         edge["total_bytes"] = edge["total_fwd_bytes"] + edge["total_bwd_bytes"]
         edge["avg_duration"] = edge["_duration_sum"] / edge["flow_count"] if edge["flow_count"] else 0.0
@@ -365,16 +364,3 @@ def tcg_edge(left: dict[str, Any], right: dict[str, Any], relation_type: str, ma
         "dst_port_pair": f"{left['dst_port']}|{right['dst_port']}",
         "protocol_pair": f"{left['protocol']}|{right['protocol']}",
     }
-
-
-def causal_edges(
-    current: dict[str, Any],
-    histories: dict[str, collections.deque[dict[str, Any]]],
-    window_seconds: int,
-    max_predecessors: int,
-) -> list[dict[str, Any]]:
-    # 保留函数名是为了让旧调用点失败得更明确，避免误用 shared_endpoint_time_window 旧规则。
-    raise RuntimeError(
-        "The old shared_endpoint_time_window TCG builder is disabled. "
-        "Use scripts/build_tcg.py --mode estimate or --mode build for CR/PR/DHR/SHR construction."
-    )

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """创建并导入 TCG TuGraph 子图。
 
-本脚本负责创建 Flow/CAUSES schema，并导入已经生成的新版 TCG 中间文件。
-旧版 direct-csv 在线构图已禁用，避免继续使用 shared_endpoint_time_window。
+本脚本通过 Bolt 创建 Flow/CAUSES schema，并导入 TCG 中间 CSV 文件：
+flows.csv 和 causes_full_parts/relation_type=.../*.csv。全量 TCG 优先使用
+lgraph_import 原生导入。
 """
 
 from __future__ import annotations
@@ -15,21 +16,20 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tugraph_homework.common import (  # noqa: E402
-    DEFAULT_DATASET,
     DEFAULT_PASSWORD,
+    ROOT,
     DEFAULT_URI,
     DEFAULT_USER,
-    TCG_PROCESSED_DIR,
     batched,
     parse_float,
     parse_int,
+    progress_bar,
     read_dict_csv,
     run_schema,
     safe_call,
     upsert_edges,
     upsert_vertices,
 )
-from tugraph_homework.transform import TCG_EDGE_FIELDS, TCG_FLOW_FIELDS  # noqa: E402
 
 
 GRAPH = "tcg"
@@ -137,14 +137,23 @@ def edge_from_csv(row: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def processed_paths(processed_dir: Path) -> tuple[Path, Path]:
-    return processed_dir / "flows.csv", processed_dir / "causes.csv"
+def processed_paths(processed_dir: Path) -> tuple[Path, list[Path]]:
+    flow_path = processed_dir / "flows.csv"
+    single_edge_path = processed_dir / "causes.csv"
+    if single_edge_path.exists():
+        return flow_path, [single_edge_path]
+    parts_dir = processed_dir / "causes_full_parts"
+    edge_paths = sorted(parts_dir.glob("relation_type=*/*.csv"))
+    return flow_path, edge_paths
 
 
 def import_processed(args: argparse.Namespace) -> None:
-    flow_path, edge_path = processed_paths(args.processed_dir)
-    if not flow_path.exists() or not edge_path.exists():
-        raise FileNotFoundError(f"Processed TCG CSV files not found in {args.processed_dir}. Run scripts/prepare_processed_csv.py --graph tcg first.")
+    flow_path, edge_paths = processed_paths(args.processed_dir)
+    if not flow_path.exists() or not edge_paths:
+        raise FileNotFoundError(
+            f"TCG CSV files not found in {args.processed_dir}. "
+            "Run scripts/prepare_processed_csv.py --graph tcg --output-root data/rebuild first."
+        )
 
     run_schema(args.uri, args.user, args.password, args.graph, SCHEMAS)
     from neo4j import GraphDatabase
@@ -155,16 +164,31 @@ def import_processed(args: argparse.Namespace) -> None:
     try:
         with driver.session(database=args.graph) as session:
             safe_call(session, "CALL db.addEdgeIndex('CAUSES', 'relation_id', false, true)")
-            for batch in batched((flow_from_csv(row) for row in read_dict_csv(flow_path)), args.batch_size):
-                upsert_vertices(session, "Flow", batch)
-                flow_count += len(batch)
-                if args.progress_interval > 0 and flow_count % args.progress_interval == 0:
-                    print(f"flow_vertices_written={flow_count}", flush=True)
-            for batch in batched((edge_from_csv(row) for row in read_dict_csv(edge_path)), args.batch_size):
-                upsert_edges(session, "CAUSES", "Flow", "source_id", "Flow", "target_id", batch, "relation_id")
-                edge_count += len(batch)
-                if args.progress_interval > 0 and edge_count % args.progress_interval == 0:
-                    print(f"causal_edges_written={edge_count}", flush=True)
+            flow_bar = progress_bar("import TCG flows", "rows")
+            try:
+                for batch in batched((flow_from_csv(row) for row in read_dict_csv(flow_path)), args.batch_size):
+                    upsert_vertices(session, "Flow", batch)
+                    flow_count += len(batch)
+                    if flow_bar is not None:
+                        flow_bar.update(len(batch))
+                    if args.progress_interval > 0 and flow_count % args.progress_interval == 0:
+                        print(f"flow_vertices_written={flow_count}", flush=True)
+            finally:
+                if flow_bar is not None:
+                    flow_bar.close()
+            edge_bar = progress_bar("import TCG edges", "rows")
+            try:
+                for edge_path in edge_paths:
+                    for batch in batched((edge_from_csv(row) for row in read_dict_csv(edge_path)), args.batch_size):
+                        upsert_edges(session, "CAUSES", "Flow", "source_id", "Flow", "target_id", batch, "relation_id")
+                        edge_count += len(batch)
+                        if edge_bar is not None:
+                            edge_bar.update(len(batch))
+                        if args.progress_interval > 0 and edge_count % args.progress_interval == 0:
+                            print(f"causal_edges_written={edge_count}", flush=True)
+            finally:
+                if edge_bar is not None:
+                    edge_bar.close()
             counts = [dict(row) for row in session.run("CALL dbms.meta.countDetail()")]
             print(counts)
             print(f"flow_vertices_written={flow_count}")
@@ -175,23 +199,17 @@ def import_processed(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create and populate the Traffic Causality Graph (TCG) in TuGraph from processed CSV files.")
-    parser.add_argument("--processed-dir", type=Path, default=TCG_PROCESSED_DIR)
-    parser.add_argument("--direct-csv", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--processed-dir", type=Path, default=ROOT / "data" / "rebuild" / "tcg")
     parser.add_argument("--uri", default=DEFAULT_URI)
     parser.add_argument("--user", default=DEFAULT_USER)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
     parser.add_argument("--graph", default=GRAPH)
     parser.add_argument("--batch-size", type=int, default=2000)
-    parser.add_argument("--max-rows", type=int, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--window-seconds", type=int, default=60, help=argparse.SUPPRESS)
-    parser.add_argument("--max-predecessors", type=int, default=3, help=argparse.SUPPRESS)
     parser.add_argument("--progress-interval", type=int, default=500_000, help="Print import progress after this many processed or written rows.")
     args = parser.parse_args()
     if not args.user or not args.password:
         parser.error("TuGraph credentials are required. Set TUGRAPH_USER/TUGRAPH_PASSWORD in .env or pass --user/--password.")
 
-    if args.direct_csv:
-        parser.error("Direct raw CSV TCG import is disabled. Build CR/PR/DHR/SHR files with scripts/build_tcg.py, then import processed files.")
     try:
         import_processed(args)
     except FileNotFoundError as exc:

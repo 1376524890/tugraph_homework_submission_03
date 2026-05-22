@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import csv
+import itertools
 import json
 import os
 from collections.abc import Iterable, Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+try:
+    from tqdm.auto import tqdm
+except ImportError:  # pragma: no cover - fallback for minimal environments.
+    tqdm = None
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = ROOT / "data" / "raw" / "Dataset-Unicauca-Version2-87Atts.csv"
@@ -47,6 +53,18 @@ def batched(items: Iterable[dict[str, Any]], size: int) -> Iterator[list[dict[st
         yield batch
 
 
+def progress_iter(items: Iterable[Any], desc: str, unit: str = "it", total: int | None = None) -> Iterable[Any]:
+    if tqdm is None:
+        return items
+    return tqdm(items, desc=desc, unit=unit, total=total, dynamic_ncols=True)
+
+
+def progress_bar(desc: str, unit: str = "it", total: int | None = None):
+    if tqdm is None:
+        return None
+    return tqdm(desc=desc, unit=unit, total=total, dynamic_ncols=True)
+
+
 def parse_int(value: str, default: int = 0) -> int:
     try:
         return int(float(value)) if value not in ("", None) else default
@@ -77,28 +95,36 @@ def endpoint_id(ip: str, port: str) -> str:
     return f"{ip}:{port}"
 
 
-def read_rows(path: Path, max_rows: int | None = None) -> Iterator[tuple[int, dict[str, str]]]:
+def read_rows(path: Path, max_rows: int | None = None, progress_desc: str | None = None) -> Iterator[tuple[int, dict[str, str]]]:
     with path.open(newline="", encoding="utf-8", errors="replace") as fh:
         reader = csv.DictReader(fh)
-        for row_number, row in enumerate(reader, start=1):
+        input_rows = itertools.islice(reader, max_rows) if max_rows is not None else reader
+        rows = progress_iter(input_rows, progress_desc, "rows", max_rows) if progress_desc else input_rows
+        for row_number, row in enumerate(rows, start=1):
             yield row_number, row
-            if max_rows is not None and row_number >= max_rows:
-                break
 
 
-def read_dict_csv(path: Path) -> Iterator[dict[str, str]]:
+def read_dict_csv(path: Path, progress_desc: str | None = None) -> Iterator[dict[str, str]]:
     with path.open(newline="", encoding="utf-8", errors="replace") as fh:
         reader = csv.DictReader(fh)
-        yield from reader
+        rows = progress_iter(reader, progress_desc, "rows") if progress_desc else reader
+        yield from rows
 
 
-def write_dict_csv(path: Path, fieldnames: list[str], rows: Iterable[dict[str, Any]]) -> int:
+def write_dict_csv(
+    path: Path,
+    fieldnames: list[str],
+    rows: Iterable[dict[str, Any]],
+    progress_desc: str | None = None,
+    total: int | None = None,
+) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
-        for row in rows:
+        output_rows = progress_iter(rows, progress_desc, "rows", total) if progress_desc else rows
+        for row in output_rows:
             writer.writerow({name: row.get(name, "") for name in fieldnames})
             count += 1
     return count
