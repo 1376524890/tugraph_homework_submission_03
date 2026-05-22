@@ -173,6 +173,7 @@ def main() -> None:
     parser.add_argument("--graph", default=GRAPH)
     parser.add_argument("--batch-size", type=int, default=5000)
     parser.add_argument("--max-rows", type=int, default=None, help="Only applies with --direct-csv.")
+    parser.add_argument("--progress-interval", type=int, default=500_000, help="Print import progress after this many written rows.")
     args = parser.parse_args()
     if not args.user or not args.password:
         parser.error("TuGraph credentials are required. Set TUGRAPH_USER/TUGRAPH_PASSWORD in .env or pass --user/--password.")
@@ -192,14 +193,24 @@ def main() -> None:
     from neo4j import GraphDatabase
 
     driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
+    endpoint_count = 0
+    edge_count = 0
     try:
         with driver.session(database=args.graph) as session:
             for batch in batched(endpoint_rows, args.batch_size):
                 upsert_vertices(session, "Endpoint", batch)
+                endpoint_count += len(batch)
+                if args.progress_interval > 0 and endpoint_count % args.progress_interval == 0:
+                    print(f"endpoint_vertices_written={endpoint_count}", flush=True)
             for batch in batched(edge_rows, args.batch_size):
                 upsert_edges(session, "COMMUNICATES", "Endpoint", "source_id", "Endpoint", "target_id", batch)
+                edge_count += len(batch)
+                if args.progress_interval > 0 and edge_count % args.progress_interval == 0:
+                    print(f"communicates_edges_written={edge_count}", flush=True)
             counts = [dict(row) for row in session.run("CALL dbms.meta.countDetail()")]
             print(counts)
+            print(f"endpoint_vertices_written={endpoint_count}")
+            print(f"communicates_edges_written={edge_count}")
     finally:
         driver.close()
 

@@ -202,12 +202,12 @@ def import_processed(args: argparse.Namespace) -> None:
             for batch in batched((flow_from_csv(row) for row in read_dict_csv(flow_path)), args.batch_size):
                 upsert_vertices(session, "Flow", batch)
                 flow_count += len(batch)
-                if flow_count % 500_000 == 0:
+                if args.progress_interval > 0 and flow_count % args.progress_interval == 0:
                     print(f"flow_vertices_written={flow_count}", flush=True)
             for batch in batched((edge_from_csv(row) for row in read_dict_csv(edge_path)), args.batch_size):
                 upsert_edges(session, "CAUSES", "Flow", "source_id", "Flow", "target_id", batch, "relation_id")
                 edge_count += len(batch)
-                if edge_count % 500_000 == 0:
+                if args.progress_interval > 0 and edge_count % args.progress_interval == 0:
                     print(f"causal_edges_written={edge_count}", flush=True)
             counts = [dict(row) for row in session.run("CALL dbms.meta.countDetail()")]
             print(counts)
@@ -229,6 +229,7 @@ def main() -> None:
     parser.add_argument("--max-rows", type=int, default=None, help="Only applies with --direct-csv.")
     parser.add_argument("--window-seconds", type=int, default=60, help="Only applies with --direct-csv.")
     parser.add_argument("--max-predecessors", type=int, default=3, help="Only applies with --direct-csv.")
+    parser.add_argument("--progress-interval", type=int, default=500_000, help="Print import progress after this many processed or written rows.")
     args = parser.parse_args()
     if not args.user or not args.password:
         parser.error("TuGraph credentials are required. Set TUGRAPH_USER/TUGRAPH_PASSWORD in .env or pass --user/--password.")
@@ -247,12 +248,14 @@ def main() -> None:
     histories: dict[str, collections.deque[dict[str, Any]]] = collections.defaultdict(collections.deque)
     flow_batch: list[dict[str, Any]] = []
     edge_batch: list[dict[str, Any]] = []
+    processed_count = 0
     edge_count = 0
 
     try:
         with driver.session(database=args.graph) as session:
             safe_call(session, "CALL db.addEdgeIndex('CAUSES', 'relation_id', false, true)")
             for row_number, row in read_rows(args.direct_csv or DEFAULT_DATASET, max_rows=args.max_rows):
+                processed_count = row_number
                 current = flow_vertex(row_number, row)
                 flow_batch.append(current)
                 edge_batch.extend(causal_edges(current, histories, args.window_seconds, args.max_predecessors))
@@ -270,7 +273,7 @@ def main() -> None:
                     edge_count += len(edge_batch)
                     edge_batch = []
 
-                if row_number % 500_000 == 0:
+                if args.progress_interval > 0 and row_number % args.progress_interval == 0:
                     print(f"processed_rows={row_number} pending_histories={len(histories)} edges={edge_count}", flush=True)
 
             upsert_vertices(session, "Flow", flow_batch)
@@ -279,6 +282,7 @@ def main() -> None:
                 edge_count += len(edge_batch)
             counts = [dict(row) for row in session.run("CALL dbms.meta.countDetail()")]
             print(counts)
+            print(f"flow_vertices_written={processed_count}")
             print(f"causal_edges_written={edge_count}")
     finally:
         driver.close()
