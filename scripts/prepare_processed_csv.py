@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
+"""生成传统 processed CSV 的兼容入口。
+
+本脚本保留 HCG processed CSV 生成能力；旧版 TCG shared_endpoint_time_window
+生成逻辑已禁用。新版 TCG 请使用 scripts/build_tcg.py。
+"""
+
 from __future__ import annotations
 
 import argparse
-import collections
 import csv
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -25,7 +29,6 @@ from tugraph_homework.transform import (  # noqa: E402
     TCG_EDGE_FIELDS,
     TCG_FLOW_FIELDS,
     build_hcg_rows,
-    causal_edges,
     flow_vertex,
 )
 
@@ -62,13 +65,16 @@ def prepare_tcg(
     window_seconds: int,
     max_predecessors: int,
 ) -> None:
+    raise RuntimeError(
+        "The old TCG shared_endpoint_time_window builder is disabled. "
+        "Use scripts/build_tcg.py --mode estimate or --mode build to construct CR/PR/DHR/SHR TCG files."
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     flow_path = output_dir / "flows.csv"
     edge_path = output_dir / "causes.csv"
     flow_tmp = flow_path.with_suffix(".csv.tmp")
     edge_tmp = edge_path.with_suffix(".csv.tmp")
 
-    histories: dict[str, collections.deque[dict[str, Any]]] = collections.defaultdict(collections.deque)
     flow_count = 0
     edge_count = 0
 
@@ -82,14 +88,6 @@ def prepare_tcg(
             current = flow_vertex(row_number, row)
             flow_writer.writerow({name: current.get(name, "") for name in TCG_FLOW_FIELDS})
             flow_count += 1
-
-            edges = causal_edges(current, histories, window_seconds, max_predecessors)
-            for edge in edges:
-                edge_writer.writerow({name: edge.get(name, "") for name in TCG_EDGE_FIELDS})
-            edge_count += len(edges)
-
-            for shared_endpoint in (current["src_endpoint"], current["dst_endpoint"]):
-                histories[shared_endpoint].append(current)
 
             if row_number % 500_000 == 0:
                 print(f"tcg_processed_rows={row_number} tcg_edges={edge_count}", flush=True)
@@ -106,8 +104,8 @@ def main() -> None:
     parser.add_argument("--graph", choices=["hcg", "tcg", "all"], default="all")
     parser.add_argument("--output-root", type=Path, default=PROCESSED_ROOT)
     parser.add_argument("--max-rows", type=int, default=None)
-    parser.add_argument("--window-seconds", type=int, default=60)
-    parser.add_argument("--max-predecessors", type=int, default=3)
+    parser.add_argument("--window-seconds", type=int, default=60, help=argparse.SUPPRESS)
+    parser.add_argument("--max-predecessors", type=int, default=3, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     hcg_dir = HCG_PROCESSED_DIR if args.output_root == PROCESSED_ROOT else args.output_root / "hcg"

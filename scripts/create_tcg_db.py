@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
+"""创建并导入 TCG TuGraph 子图。
+
+本脚本负责创建 Flow/CAUSES schema，并导入已经生成的新版 TCG 中间文件。
+旧版 direct-csv 在线构图已禁用，避免继续使用 shared_endpoint_time_window。
+"""
+
 from __future__ import annotations
 
 import argparse
-import collections
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,40 +21,18 @@ from tugraph_homework.common import (  # noqa: E402
     DEFAULT_USER,
     TCG_PROCESSED_DIR,
     batched,
-    endpoint_id,
     parse_float,
     parse_int,
-    parse_timestamp,
     read_dict_csv,
-    read_rows,
     run_schema,
     safe_call,
     upsert_edges,
     upsert_vertices,
 )
+from tugraph_homework.transform import TCG_EDGE_FIELDS, TCG_FLOW_FIELDS  # noqa: E402
 
 
 GRAPH = "tcg"
-TCG_FLOW_FIELDS = [
-    "record_id",
-    "flow_id",
-    "src_endpoint",
-    "dst_endpoint",
-    "protocol",
-    "timestamp",
-    "timestamp_epoch",
-    "duration",
-    "fwd_packets",
-    "bwd_packets",
-    "fwd_bytes",
-    "bwd_bytes",
-    "label",
-    "l7_protocol",
-    "protocol_name",
-]
-TCG_EDGE_FIELDS = ["source_id", "target_id", "relation_id", "shared_endpoint", "delta_seconds", "rule"]
-
-
 SCHEMAS: list[dict[str, Any]] = [
     {
         "label": "Flow",
@@ -61,6 +44,10 @@ SCHEMAS: list[dict[str, Any]] = [
             {"name": "flow_id", "type": "STRING", "optional": False, "index": True},
             {"name": "src_endpoint", "type": "STRING", "optional": False, "index": True},
             {"name": "dst_endpoint", "type": "STRING", "optional": False, "index": True},
+            {"name": "src_ip", "type": "STRING", "optional": False, "index": True},
+            {"name": "src_port", "type": "INT64", "optional": False, "index": True},
+            {"name": "dst_ip", "type": "STRING", "optional": False, "index": True},
+            {"name": "dst_port", "type": "INT64", "optional": False, "index": True},
             {"name": "protocol", "type": "INT64", "optional": False},
             {"name": "timestamp", "type": "STRING", "optional": True},
             {"name": "timestamp_epoch", "type": "INT64", "optional": False, "index": True},
@@ -81,73 +68,25 @@ SCHEMAS: list[dict[str, Any]] = [
         "constraints": [["Flow", "Flow"]],
         "properties": [
             {"name": "relation_id", "type": "STRING", "optional": False},
+            {"name": "src_record_id", "type": "STRING", "optional": False, "index": True},
+            {"name": "dst_record_id", "type": "STRING", "optional": False, "index": True},
+            {"name": "relation_type", "type": "STRING", "optional": False, "index": True},
+            {"name": "relation_priority", "type": "INT64", "optional": False},
+            {"name": "delta_seconds", "type": "INT64", "optional": False, "index": True},
+            {"name": "same_timestamp", "type": "BOOL", "optional": False},
+            {"name": "matched_rule", "type": "STRING", "optional": False},
+            {"name": "src_flow_timestamp_epoch", "type": "INT64", "optional": False},
+            {"name": "dst_flow_timestamp_epoch", "type": "INT64", "optional": False},
+            {"name": "shared_ip", "type": "STRING", "optional": True, "index": True},
             {"name": "shared_endpoint", "type": "STRING", "optional": False, "index": True},
-            {"name": "delta_seconds", "type": "INT64", "optional": False},
-            {"name": "rule", "type": "STRING", "optional": False},
+            {"name": "src_ip_pair", "type": "STRING", "optional": False},
+            {"name": "src_port_pair", "type": "STRING", "optional": False},
+            {"name": "dst_ip_pair", "type": "STRING", "optional": False},
+            {"name": "dst_port_pair", "type": "STRING", "optional": False},
+            {"name": "protocol_pair", "type": "STRING", "optional": False},
         ],
     },
 ]
-
-
-def flow_vertex(row_number: int, row: dict[str, str]) -> dict[str, Any]:
-    src = endpoint_id(row["Source.IP"], row["Source.Port"])
-    dst = endpoint_id(row["Destination.IP"], row["Destination.Port"])
-    timestamp_text, timestamp_epoch = parse_timestamp(row.get("Timestamp", ""))
-    return {
-        "record_id": str(row_number),
-        "flow_id": row.get("Flow.ID", ""),
-        "src_endpoint": src,
-        "dst_endpoint": dst,
-        "protocol": parse_int(row.get("Protocol", "0")),
-        "timestamp": timestamp_text,
-        "timestamp_epoch": timestamp_epoch,
-        "duration": parse_float(row.get("Flow.Duration", "0")),
-        "fwd_packets": parse_int(row.get("Total.Fwd.Packets", "0")),
-        "bwd_packets": parse_int(row.get("Total.Backward.Packets", "0")),
-        "fwd_bytes": parse_int(row.get("Total.Length.of.Fwd.Packets", "0")),
-        "bwd_bytes": parse_int(row.get("Total.Length.of.Bwd.Packets", "0")),
-        "label": row.get("Label", ""),
-        "l7_protocol": parse_int(row.get("L7Protocol", "0")),
-        "protocol_name": row.get("ProtocolName", ""),
-    }
-
-
-def causal_edges(
-    current: dict[str, Any],
-    histories: dict[str, collections.deque[dict[str, Any]]],
-    window_seconds: int,
-    max_predecessors: int,
-) -> list[dict[str, Any]]:
-    edges: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
-    current_ts = current["timestamp_epoch"]
-    if current_ts <= 0:
-        return edges
-
-    for shared_endpoint in (current["src_endpoint"], current["dst_endpoint"]):
-        history = histories[shared_endpoint]
-        while history and current_ts - history[0]["timestamp_epoch"] > window_seconds:
-            history.popleft()
-        for previous in list(history)[-max_predecessors:]:
-            delta = current_ts - previous["timestamp_epoch"]
-            if delta < 0:
-                continue
-            key = (previous["record_id"], current["record_id"], shared_endpoint)
-            if key in seen:
-                continue
-            seen.add(key)
-            relation_id = f"{previous['record_id']}->{current['record_id']}@{shared_endpoint}"
-            edges.append(
-                {
-                    "source_id": previous["record_id"],
-                    "target_id": current["record_id"],
-                    "relation_id": relation_id,
-                    "shared_endpoint": shared_endpoint,
-                    "delta_seconds": delta,
-                    "rule": "shared_endpoint_time_window",
-                }
-            )
-    return edges
 
 
 def flow_from_csv(row: dict[str, str]) -> dict[str, Any]:
@@ -156,6 +95,10 @@ def flow_from_csv(row: dict[str, str]) -> dict[str, Any]:
         "flow_id": row.get("flow_id", ""),
         "src_endpoint": row["src_endpoint"],
         "dst_endpoint": row["dst_endpoint"],
+        "src_ip": row.get("src_ip", ""),
+        "src_port": parse_int(row.get("src_port", "0")),
+        "dst_ip": row.get("dst_ip", ""),
+        "dst_port": parse_int(row.get("dst_port", "0")),
         "protocol": parse_int(row.get("protocol", "0")),
         "timestamp": row.get("timestamp", ""),
         "timestamp_epoch": parse_int(row.get("timestamp_epoch", "0")),
@@ -175,9 +118,22 @@ def edge_from_csv(row: dict[str, str]) -> dict[str, Any]:
         "source_id": row["source_id"],
         "target_id": row["target_id"],
         "relation_id": row["relation_id"],
-        "shared_endpoint": row["shared_endpoint"],
+        "src_record_id": row.get("src_record_id", row.get("source_id", "")),
+        "dst_record_id": row.get("dst_record_id", row.get("target_id", "")),
+        "relation_type": row.get("relation_type", ""),
+        "relation_priority": parse_int(row.get("relation_priority", "0")),
         "delta_seconds": parse_int(row.get("delta_seconds", "0")),
-        "rule": row.get("rule", ""),
+        "same_timestamp": row.get("same_timestamp", "").lower() == "true",
+        "matched_rule": row.get("matched_rule", ""),
+        "src_flow_timestamp_epoch": parse_int(row.get("src_flow_timestamp_epoch", "0")),
+        "dst_flow_timestamp_epoch": parse_int(row.get("dst_flow_timestamp_epoch", "0")),
+        "shared_ip": row.get("shared_ip", ""),
+        "shared_endpoint": row.get("shared_endpoint", ""),
+        "src_ip_pair": row.get("src_ip_pair", ""),
+        "src_port_pair": row.get("src_port_pair", ""),
+        "dst_ip_pair": row.get("dst_ip_pair", ""),
+        "dst_port_pair": row.get("dst_port_pair", ""),
+        "protocol_pair": row.get("protocol_pair", ""),
     }
 
 
@@ -220,72 +176,26 @@ def import_processed(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create and populate the Traffic Causality Graph (TCG) in TuGraph from processed CSV files.")
     parser.add_argument("--processed-dir", type=Path, default=TCG_PROCESSED_DIR)
-    parser.add_argument("--direct-csv", type=Path, default=None, help="Bypass processed CSV files and import directly from a raw CSV.")
+    parser.add_argument("--direct-csv", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--uri", default=DEFAULT_URI)
     parser.add_argument("--user", default=DEFAULT_USER)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
     parser.add_argument("--graph", default=GRAPH)
     parser.add_argument("--batch-size", type=int, default=2000)
-    parser.add_argument("--max-rows", type=int, default=None, help="Only applies with --direct-csv.")
-    parser.add_argument("--window-seconds", type=int, default=60, help="Only applies with --direct-csv.")
-    parser.add_argument("--max-predecessors", type=int, default=3, help="Only applies with --direct-csv.")
+    parser.add_argument("--max-rows", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--window-seconds", type=int, default=60, help=argparse.SUPPRESS)
+    parser.add_argument("--max-predecessors", type=int, default=3, help=argparse.SUPPRESS)
     parser.add_argument("--progress-interval", type=int, default=500_000, help="Print import progress after this many processed or written rows.")
     args = parser.parse_args()
     if not args.user or not args.password:
         parser.error("TuGraph credentials are required. Set TUGRAPH_USER/TUGRAPH_PASSWORD in .env or pass --user/--password.")
 
-    if not args.direct_csv:
-        try:
-            import_processed(args)
-        except FileNotFoundError as exc:
-            parser.error(str(exc))
-        return
-
-    run_schema(args.uri, args.user, args.password, args.graph, SCHEMAS)
-    from neo4j import GraphDatabase
-
-    driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
-    histories: dict[str, collections.deque[dict[str, Any]]] = collections.defaultdict(collections.deque)
-    flow_batch: list[dict[str, Any]] = []
-    edge_batch: list[dict[str, Any]] = []
-    processed_count = 0
-    edge_count = 0
-
+    if args.direct_csv:
+        parser.error("Direct raw CSV TCG import is disabled. Build CR/PR/DHR/SHR files with scripts/build_tcg.py, then import processed files.")
     try:
-        with driver.session(database=args.graph) as session:
-            safe_call(session, "CALL db.addEdgeIndex('CAUSES', 'relation_id', false, true)")
-            for row_number, row in read_rows(args.direct_csv or DEFAULT_DATASET, max_rows=args.max_rows):
-                processed_count = row_number
-                current = flow_vertex(row_number, row)
-                flow_batch.append(current)
-                edge_batch.extend(causal_edges(current, histories, args.window_seconds, args.max_predecessors))
-                for shared_endpoint in (current["src_endpoint"], current["dst_endpoint"]):
-                    histories[shared_endpoint].append(current)
-
-                if len(flow_batch) >= args.batch_size:
-                    upsert_vertices(session, "Flow", flow_batch)
-                    flow_batch = []
-                if len(edge_batch) >= args.batch_size:
-                    if flow_batch:
-                        upsert_vertices(session, "Flow", flow_batch)
-                        flow_batch = []
-                    upsert_edges(session, "CAUSES", "Flow", "source_id", "Flow", "target_id", edge_batch, "relation_id")
-                    edge_count += len(edge_batch)
-                    edge_batch = []
-
-                if args.progress_interval > 0 and row_number % args.progress_interval == 0:
-                    print(f"processed_rows={row_number} pending_histories={len(histories)} edges={edge_count}", flush=True)
-
-            upsert_vertices(session, "Flow", flow_batch)
-            if edge_batch:
-                upsert_edges(session, "CAUSES", "Flow", "source_id", "Flow", "target_id", edge_batch, "relation_id")
-                edge_count += len(edge_batch)
-            counts = [dict(row) for row in session.run("CALL dbms.meta.countDetail()")]
-            print(counts)
-            print(f"flow_vertices_written={processed_count}")
-            print(f"causal_edges_written={edge_count}")
-    finally:
-        driver.close()
+        import_processed(args)
+    except FileNotFoundError as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":

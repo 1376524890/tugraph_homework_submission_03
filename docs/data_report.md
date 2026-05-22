@@ -137,6 +137,8 @@
 
 ## 3. TCG — 流量因果图 (Traffic Causality Graph)
 
+> 说明：本节中已有的边数量、`shared_endpoint_time_window`、默认 60s 窗口和最多 3 个前驱统计属于旧版 TCG 结果，仅用于历史对照。论文对齐版 TCG 已改为 CR、PR、DHR、SHR 四类因果关系构图，构图阶段不使用时间窗口，也不使用 `max_predecessors` 截断。`delta_seconds` 仅作为边属性，供查询视图、采样、实验和嵌入训练阶段过滤。
+
 以每条网络流为顶点，流之间通过共享端点和时间窗口建立的因果关系为边。
 
 ### 3.1 Flow 顶点
@@ -213,7 +215,17 @@
 |------|-----|
 | 总数 | **8,762,187** |
 | 约束 | Flow → Flow |
-| 生成规则 | shared_endpoint_time_window (默认 60s 窗口, 最多 3 个前驱) |
+| 生成规则 | 旧版：shared_endpoint_time_window (默认 60s 窗口, 最多 3 个前驱) |
+
+新版 TCG 的 `CAUSES` 边定义如下：
+
+| 字段 | 新版规则 |
+|------|----------|
+| 顶点 | 每条原始 flow 记录为一个 `Flow` 节点，主键为 `record_id`；`flow_id` 仅作为普通属性。 |
+| 关系类型 | `CR`, `PR`, `DHR`, `SHR` |
+| 优先级 | `CR = 1`, `PR = 2`, `DHR = 3`, `SHR = 4` |
+| 时间处理 | 构图阶段不按 `delta_seconds` 过滤；较早 flow 指向较晚 flow，同时间按 `record_id` 排序。 |
+| 查询视图 | `causes_delta_60s.parquet`、`causes_delta_300s.parquet` 等是派生子图，不是原始 TCG。 |
 
 **属性定义:**
 
@@ -311,10 +323,23 @@ Flow (VERTEX)
   └── protocol_name  : STRING  [index, optional]
 
 CAUSES (EDGE: Flow → Flow)
-  ├── relation_id     : STRING  [unique index]
-  ├── shared_endpoint : STRING  [index]
-  ├── delta_seconds   : INT64
-  └── rule            : STRING
+  ├── relation_id              : STRING  [unique index]
+  ├── src_record_id            : STRING  [index]
+  ├── dst_record_id            : STRING  [index]
+  ├── relation_type            : STRING  [index]
+  ├── relation_priority        : INT64
+  ├── delta_seconds            : INT64   [index]
+  ├── same_timestamp           : BOOL
+  ├── matched_rule             : STRING
+  ├── src_flow_timestamp_epoch : INT64
+  ├── dst_flow_timestamp_epoch : INT64
+  ├── shared_ip                : STRING  [index]
+  ├── shared_endpoint          : STRING  [index]
+  ├── src_ip_pair              : STRING
+  ├── src_port_pair            : STRING
+  ├── dst_ip_pair              : STRING
+  ├── dst_port_pair            : STRING
+  └── protocol_pair            : STRING
 ```
 
 ---
@@ -329,7 +354,8 @@ CAUSES (EDGE: Flow → Flow)
 
 ### TCG (Traffic Causality Graph)
 
-- **顶点**: 每条原始网络流记录为一个 Flow 节点
-- **边**: 两条流若共享一个端点且时间差在窗口 (默认 60s) 内，则建立 CAUSES 因果边
-- **参数**: `--window-seconds 60`, `--max-predecessors 3`
+- **顶点**: 每条原始网络流记录为一个 Flow 节点，`record_id` 为主键，`flow_id` 不作为主键
+- **边**: 两条流满足 `CR`、`PR`、`DHR`、`SHR` 之一时建立 `CAUSES` 因果边
+- **时间处理**: 构图阶段不使用 `window_seconds`，不做 `delta_seconds <= 60/300` 过滤，不使用 `max_predecessors`
+- **查询视图**: 后续按 `delta_seconds` 过滤得到 `causes_delta_60s.parquet` 等派生子图
 - **适用场景**: 攻击链追踪、流量因果推理、横向移动检测

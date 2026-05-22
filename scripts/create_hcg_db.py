@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
+"""创建并导入 HCG TuGraph 子图。
+
+本脚本负责创建 Endpoint/COMMUNICATES schema，并把已生成的 HCG CSV 导入
+TuGraph；也保留小规模 direct-csv 导入能力用于验证。
+"""
+
 from __future__ import annotations
 
 import argparse
-import collections
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,33 +21,17 @@ from tugraph_homework.common import (  # noqa: E402
     DEFAULT_USER,
     HCG_PROCESSED_DIR,
     batched,
-    endpoint_id,
     parse_float,
     parse_int,
-    parse_timestamp,
     read_dict_csv,
-    read_rows,
     run_schema,
     upsert_edges,
     upsert_vertices,
 )
+from tugraph_homework.transform import HCG_EDGE_FIELDS, HCG_ENDPOINT_FIELDS, build_hcg_rows  # noqa: E402
 
 
 GRAPH = "hcg"
-HCG_ENDPOINT_FIELDS = ["endpoint_id", "ip", "port"]
-HCG_EDGE_FIELDS = [
-    "source_id",
-    "target_id",
-    "flow_count",
-    "first_seen",
-    "last_seen",
-    "protocol_names",
-    "total_fwd_packets",
-    "total_bwd_packets",
-    "total_fwd_bytes",
-    "total_bwd_bytes",
-    "avg_duration",
-]
 
 
 SCHEMAS: list[dict[str, Any]] = [
@@ -55,6 +44,10 @@ SCHEMAS: list[dict[str, Any]] = [
             {"name": "endpoint_id", "type": "STRING", "optional": False},
             {"name": "ip", "type": "STRING", "optional": False, "index": True},
             {"name": "port", "type": "INT64", "optional": False, "index": True},
+            {"name": "is_private_ip", "type": "BOOL", "optional": False, "index": True},
+            {"name": "port_bucket", "type": "STRING", "optional": False, "index": True},
+            {"name": "is_common_service_port", "type": "BOOL", "optional": False, "index": True},
+            {"name": "is_proxy_port", "type": "BOOL", "optional": False, "index": True},
         ],
     },
     {
@@ -63,76 +56,32 @@ SCHEMAS: list[dict[str, Any]] = [
         "detach_property": True,
         "constraints": [["Endpoint", "Endpoint"]],
         "properties": [
+            {"name": "edge_id", "type": "STRING", "optional": False},
+            {"name": "src_endpoint", "type": "STRING", "optional": False, "index": True},
+            {"name": "dst_endpoint", "type": "STRING", "optional": False, "index": True},
             {"name": "flow_count", "type": "INT64", "optional": False},
+            {"name": "first_seen_epoch", "type": "INT64", "optional": False, "index": True},
+            {"name": "last_seen_epoch", "type": "INT64", "optional": False, "index": True},
             {"name": "first_seen", "type": "STRING", "optional": True},
             {"name": "last_seen", "type": "STRING", "optional": True},
-            {"name": "protocol_names", "type": "STRING", "optional": True},
             {"name": "total_fwd_packets", "type": "INT64", "optional": False},
             {"name": "total_bwd_packets", "type": "INT64", "optional": False},
+            {"name": "total_packets", "type": "INT64", "optional": False},
             {"name": "total_fwd_bytes", "type": "INT64", "optional": False},
             {"name": "total_bwd_bytes", "type": "INT64", "optional": False},
+            {"name": "total_bytes", "type": "INT64", "optional": False},
             {"name": "avg_duration", "type": "DOUBLE", "optional": False},
+            {"name": "min_duration", "type": "DOUBLE", "optional": False},
+            {"name": "max_duration", "type": "DOUBLE", "optional": False},
+            {"name": "protocol_set", "type": "STRING", "optional": True},
+            {"name": "protocol_name_set", "type": "STRING", "optional": True},
+            {"name": "major_protocol", "type": "INT64", "optional": False, "index": True},
+            {"name": "major_protocol_name", "type": "STRING", "optional": True, "index": True},
+            {"name": "protocol_entropy", "type": "DOUBLE", "optional": False},
+            {"name": "l7_protocol_entropy", "type": "DOUBLE", "optional": False},
         ],
     },
 ]
-
-
-def build_hcg_rows(csv_path: Path, max_rows: int | None) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], dict[str, Any]]]:
-    endpoints: dict[str, dict[str, Any]] = {}
-    edges: dict[tuple[str, str], dict[str, Any]] = {}
-    protocol_sets: dict[tuple[str, str], set[str]] = collections.defaultdict(set)
-
-    for row_number, row in read_rows(csv_path, max_rows=max_rows):
-        src = endpoint_id(row["Source.IP"], row["Source.Port"])
-        dst = endpoint_id(row["Destination.IP"], row["Destination.Port"])
-        endpoints.setdefault(src, {"endpoint_id": src, "ip": row["Source.IP"], "port": parse_int(row["Source.Port"])})
-        endpoints.setdefault(dst, {"endpoint_id": dst, "ip": row["Destination.IP"], "port": parse_int(row["Destination.Port"])})
-
-        timestamp_text, timestamp_epoch = parse_timestamp(row.get("Timestamp", ""))
-        key = (src, dst)
-        edge = edges.setdefault(
-            key,
-            {
-                "source_id": src,
-                "target_id": dst,
-                "flow_count": 0,
-                "first_seen": timestamp_text,
-                "last_seen": timestamp_text,
-                "_first_epoch": timestamp_epoch,
-                "_last_epoch": timestamp_epoch,
-                "total_fwd_packets": 0,
-                "total_bwd_packets": 0,
-                "total_fwd_bytes": 0,
-                "total_bwd_bytes": 0,
-                "_duration_sum": 0.0,
-            },
-        )
-        edge["flow_count"] += 1
-        edge["total_fwd_packets"] += parse_int(row.get("Total.Fwd.Packets", "0"))
-        edge["total_bwd_packets"] += parse_int(row.get("Total.Backward.Packets", "0"))
-        edge["total_fwd_bytes"] += parse_int(row.get("Total.Length.of.Fwd.Packets", "0"))
-        edge["total_bwd_bytes"] += parse_int(row.get("Total.Length.of.Bwd.Packets", "0"))
-        edge["_duration_sum"] += parse_float(row.get("Flow.Duration", "0"))
-        if timestamp_epoch and (not edge["_first_epoch"] or timestamp_epoch < edge["_first_epoch"]):
-            edge["_first_epoch"] = timestamp_epoch
-            edge["first_seen"] = timestamp_text
-        if timestamp_epoch and timestamp_epoch > edge["_last_epoch"]:
-            edge["_last_epoch"] = timestamp_epoch
-            edge["last_seen"] = timestamp_text
-        protocol_name = row.get("ProtocolName", "")
-        if protocol_name and len(protocol_sets[key]) < 12:
-            protocol_sets[key].add(protocol_name)
-
-        if row_number % 500_000 == 0:
-            print(f"aggregated_rows={row_number} endpoints={len(endpoints)} edges={len(edges)}", flush=True)
-
-    for key, edge in edges.items():
-        edge["protocol_names"] = ",".join(sorted(protocol_sets.get(key, set())))
-        edge["avg_duration"] = edge["_duration_sum"] / edge["flow_count"] if edge["flow_count"] else 0.0
-        edge.pop("_duration_sum", None)
-        edge.pop("_first_epoch", None)
-        edge.pop("_last_epoch", None)
-    return endpoints, edges
 
 
 def hcg_endpoint_from_csv(row: dict[str, str]) -> dict[str, Any]:
@@ -140,22 +89,40 @@ def hcg_endpoint_from_csv(row: dict[str, str]) -> dict[str, Any]:
         "endpoint_id": row["endpoint_id"],
         "ip": row["ip"],
         "port": parse_int(row.get("port", "0")),
+        "is_private_ip": row.get("is_private_ip", "").lower() == "true",
+        "port_bucket": row.get("port_bucket", "invalid"),
+        "is_common_service_port": row.get("is_common_service_port", "").lower() == "true",
+        "is_proxy_port": row.get("is_proxy_port", "").lower() == "true",
     }
 
 
 def hcg_edge_from_csv(row: dict[str, str]) -> dict[str, Any]:
     return {
-        "source_id": row["source_id"],
-        "target_id": row["target_id"],
+        "edge_id": row.get("edge_id", ""),
+        "src_endpoint": row.get("src_endpoint", row.get("source_id", "")),
+        "dst_endpoint": row.get("dst_endpoint", row.get("target_id", "")),
+        "source_id": row.get("source_id", row.get("src_endpoint", "")),
+        "target_id": row.get("target_id", row.get("dst_endpoint", "")),
         "flow_count": parse_int(row.get("flow_count", "0")),
+        "first_seen_epoch": parse_int(row.get("first_seen_epoch", "0")),
+        "last_seen_epoch": parse_int(row.get("last_seen_epoch", "0")),
         "first_seen": row.get("first_seen", ""),
         "last_seen": row.get("last_seen", ""),
-        "protocol_names": row.get("protocol_names", ""),
         "total_fwd_packets": parse_int(row.get("total_fwd_packets", "0")),
         "total_bwd_packets": parse_int(row.get("total_bwd_packets", "0")),
+        "total_packets": parse_int(row.get("total_packets", "0")),
         "total_fwd_bytes": parse_int(row.get("total_fwd_bytes", "0")),
         "total_bwd_bytes": parse_int(row.get("total_bwd_bytes", "0")),
+        "total_bytes": parse_int(row.get("total_bytes", "0")),
         "avg_duration": parse_float(row.get("avg_duration", "0")),
+        "min_duration": parse_float(row.get("min_duration", "0")),
+        "max_duration": parse_float(row.get("max_duration", "0")),
+        "protocol_set": row.get("protocol_set", ""),
+        "protocol_name_set": row.get("protocol_name_set", ""),
+        "major_protocol": parse_int(row.get("major_protocol", "0")),
+        "major_protocol_name": row.get("major_protocol_name", ""),
+        "protocol_entropy": parse_float(row.get("protocol_entropy", "0")),
+        "l7_protocol_entropy": parse_float(row.get("l7_protocol_entropy", "0")),
     }
 
 
