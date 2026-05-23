@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import itertools
-import json
 import os
 from collections.abc import Iterable, Iterator
 from datetime import datetime
@@ -112,18 +111,6 @@ def write_dict_csv(
     return count
 
 
-def safe_call(session, query: str, **params: Any) -> None:
-    try:
-        list(session.run(query, **params))
-    except Exception as exc:
-        if not exc.__class__.__module__.startswith("neo4j"):
-            raise
-        message = str(exc).lower()
-        if "already" in message or "exist" in message or "same name" in message:
-            return
-        raise
-
-
 def ensure_graph(uri: str, user: str, password: str, graph: str) -> None:
     from neo4j import GraphDatabase
 
@@ -137,18 +124,13 @@ def ensure_graph(uri: str, user: str, password: str, graph: str) -> None:
         driver.close()
 
 
-def run_schema(uri: str, user: str, password: str, graph: str, schemas: list[dict[str, Any]]) -> None:
-    ensure_graph(uri, user, password, graph)
+def schema_exists(uri: str, user: str, password: str, graph: str, label: str) -> bool:
     from neo4j import GraphDatabase
 
     driver = GraphDatabase.driver(uri, auth=(user, password))
     try:
         with driver.session(database=graph) as session:
-            for schema in schemas:
-                payload = json.dumps(schema, ensure_ascii=False)
-                if schema["type"] == "VERTEX":
-                    safe_call(session, "CALL db.createVertexLabelByJson($json_data)", json_data=payload)
-                else:
-                    safe_call(session, "CALL db.createEdgeLabelByJson($json_data)", json_data=payload)
+            rows = [dict(row) for row in session.run("CALL dbms.meta.countDetail()")]
+            return any(row.get("label") == label for row in rows)
     finally:
         driver.close()

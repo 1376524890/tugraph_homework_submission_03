@@ -20,20 +20,36 @@ data/raw/Dataset-Unicauca-Version2-87Atts.csv
 | `data/processed/tcg/` | TCG 中间文件：`flows.csv`、`causes_full_parts/`。 |
 | `data/processed/reports/` | TCG 边数量估算报告。 |
 | `data/exports/` | 导出结果。 |
-| `scripts/` | 数据检查、构图、查询视图、schema 初始化和原生导入配置脚本。 |
+| `scripts/` | 数据检查、构图、查询视图和 TuGraph 原生导入入口脚本。 |
 | `src/tugraph_homework/` | 共享转换和通用工具代码。 |
 | `docs/` | 数据结构、目录规划、图建模说明和唯一实验记录。 |
 
 实验过程统一维护在 [docs/experiment_record.md](docs/experiment_record.md)。后续数据下载、处理、校验、导入和查询实验只追加或更新这一个实验记录文档，避免多份记录相互不一致。
 
-## 环境
+## 环境与容器启动
 
-脚本通过 `PYTHONPATH=src` 运行。生成 Parquet 或读取 Parquet 查询视图时需要 `pandas` 和 `pyarrow`；通过 Bolt 创建图和 schema 时需要 `neo4j` Python 驱动。数据导入统一使用 TuGraph 原生 `lgraph_import`。
+脚本通过 `PYTHONPATH=src` 运行。生成 Parquet 或读取 Parquet 查询视图时需要 `pandas` 和 `pyarrow`；TuGraph 导入入口通过 Bolt 创建图、通过 Docker 调用原生 `lgraph_import` 导入 CSV，因此需要 `neo4j` Python 驱动和 Docker。
 
 TuGraph 连接信息可写入本地 `.env`：
 
 ```bash
 cp .env.example .env
+```
+
+TuGraph 服务由仓库根目录的 `docker-compose.yml` 管理。根目录 `.env` 已指定作业目录下的持久化路径，启动时会自动挂载数据、日志、导入目录和临时目录：
+
+```bash
+cd ..
+docker compose up -d
+```
+
+挂载关系：
+
+```text
+tugraph_homework_submission_03/docker/tugraph-data   -> /var/lib/lgraph/data
+tugraph_homework_submission_03/docker/tugraph-logs   -> /var/log/lgraph_log
+tugraph_homework_submission_03/docker/tugraph-import -> /import
+tugraph_homework_submission_03/docker/tugraph-tmp    -> /tmp
 ```
 
 ## 数据检查
@@ -237,9 +253,9 @@ data/processed/tcg/query_views/causes_delta_5s.parquet.report.md
 
 ## TuGraph 导入
 
-HCG 和 TCG 数据统一使用 TuGraph 原生 `lgraph_import` 导入 CSV。Bolt 只保留
-`scripts/create_tugraph_schema.py` 这个建图/schema 入口，不再通过 Bolt 写入 CSV
-数据。
+HCG 和 TCG 数据统一使用 `scripts/import_tugraph_native.py`。该脚本先通过 Bolt
+确保目标图存在，再通过 Docker Compose 停止 `tugraph-db`，用 TuGraph 原生
+`lgraph_import` 导入 CSV，最后通过 Docker Compose 启动服务。Bolt 不写入 CSV 数据。
 
 生成 HCG 和 TCG CSV：
 
@@ -253,68 +269,29 @@ PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
   --max-candidate-edges 150000000
 ```
 
-生成 `lgraph_import` 配置：
+导入前可先打印实际会执行的 Docker 命令：
 
 ```bash
-PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
+PYTHONPATH=src python3 scripts/import_tugraph_native.py \
   --graph-type hcg \
-  --processed-dir docker/tugraph-import/hcg \
-  --local-import-root docker/tugraph-import \
-  --container-import-root /import \
-  --output docker/tugraph-import/hcg/import.json
-
-PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
-  --graph-type tcg \
-  --processed-dir docker/tugraph-import/tcg \
-  --local-import-root docker/tugraph-import \
-  --container-import-root /import \
-  --output docker/tugraph-import/tcg/import.json
+  --dry-run
 ```
 
-运行原生导入时，容器需要能访问 `/import`。离线导入会写入数据库目录，运行前先停止正在使用同一数据目录的 TuGraph 服务。导入容器同时把 `docker/tugraph-tmp` 挂载到 `/tmp`，避免临时文件写入 Docker overlay 导致根分区爆满。
+执行 HCG 导入：
 
 ```bash
 set -a
 . ./.env
 set +a
 
-docker stop tugraph-db
-
-docker run --rm \
-  -v "$PWD/docker/tugraph-data:/var/lib/lgraph/data" \
-  -v "$PWD/docker/tugraph-import:/import" \
-  -v "$PWD/docker/tugraph-tmp:/tmp" \
-  custom-tugraph-runtime:latest \
-  lgraph_import \
-  --dir /var/lib/lgraph/data \
-  --config_file /import/hcg/import.json \
-  --graph hcg \
-  --user "$TUGRAPH_USER" \
-  --password "$TUGRAPH_PASSWORD"
-
-docker run --rm \
-  -v "$PWD/docker/tugraph-data:/var/lib/lgraph/data" \
-  -v "$PWD/docker/tugraph-import:/import" \
-  -v "$PWD/docker/tugraph-tmp:/tmp" \
-  custom-tugraph-runtime:latest \
-  lgraph_import \
-  --dir /var/lib/lgraph/data \
-  --config_file /import/tcg/import.json \
-  --graph tcg \
-  --user "$TUGRAPH_USER" \
-  --password "$TUGRAPH_PASSWORD"
-
-docker start tugraph-db
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg
 ```
 
-如果只需要在线创建图和 schema，不导入数据，可以用 Bolt schema 脚本：
-
-```bash
-PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type hcg
-PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type tcg
-```
-
-当前全量 TCG CSV 预估约 24.01 GiB，TuGraph 导入后存储会进一步放大，运行前应确认磁盘空间和目标图容量。
+导入脚本会生成 `docker/tugraph-import/<graph-type>/import.json`。服务容器由
+Docker Compose 自动挂载 `/import` 和 `/tmp`；临时导入容器也使用同一组
+`docker/tugraph-import:/import`、`docker/tugraph-tmp:/tmp` 挂载，避免大规模导入
+临时文件写入 Docker overlay。当前全量 TCG CSV 预估约 24.01 GiB，TuGraph 导入后
+存储会进一步放大；TCG 全量导入前应确认磁盘空间和目标图容量。
 
 ## 校验重点
 

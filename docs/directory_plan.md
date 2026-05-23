@@ -9,8 +9,11 @@
 | `data/processed/tcg/` | TCG 中间文件：`flows` 和 `causes_full_parts/` 分区。 |
 | `data/processed/reports/` | TCG 边数量估算报告。 |
 | `data/exports/` | 从 TuGraph 或脚本导出的结果文件。 |
-| `docker/tugraph-import/` | 可选的 TuGraph 原生导入 CSV 目录；CSV 生成脚本可把输出写到这里。 |
-| `scripts/` | 数据检查、构图、查询视图、schema 初始化和原生导入配置入口脚本。 |
+| `docker/tugraph-data/` | Docker Compose 挂载到 `/var/lib/lgraph/data` 的 TuGraph 数据目录。 |
+| `docker/tugraph-logs/` | Docker Compose 挂载到 `/var/log/lgraph_log` 的 TuGraph 日志目录。 |
+| `docker/tugraph-import/` | Docker Compose 挂载到 `/import` 的 TuGraph 原生导入 CSV 目录。 |
+| `docker/tugraph-tmp/` | Docker Compose 挂载到 `/tmp` 的大文件临时目录。 |
+| `scripts/` | 数据检查、构图、查询视图和 TuGraph 原生导入入口脚本。 |
 | `src/tugraph_homework/` | 共享转换和通用 Python 工具代码。 |
 | `docs/` | 数据结构、建模方案、运行说明和唯一实验记录。 |
 
@@ -44,8 +47,24 @@ data/processed/tcg/causes_full_parts/relation_type=SHR/*.csv
 data/processed/reports/tcg_edge_estimation_report.md
 ```
 
-如需给 TuGraph 原生导入准备 CSV，可把 `--output-root` 改成
+给 TuGraph 原生导入准备 CSV 时，可把 `--output-root` 改成
 `docker/tugraph-import`，输出结构会保持一致。
 
-TuGraph 数据导入统一使用原生 `lgraph_import`。Bolt 入口只保留
-`scripts/create_tugraph_schema.py`，用于在线创建图和 schema，不写入 CSV 数据。
+TuGraph 数据导入统一使用 `scripts/import_tugraph_native.py`。Bolt 只用于确保目标图
+存在；CSV 数据由 TuGraph 原生 `lgraph_import` 导入。
+
+容器启动和服务生命周期由仓库根目录的 Docker Compose 配置管理：
+
+```bash
+cd ..
+docker compose up -d
+```
+
+Compose 启动后自动挂载：
+
+```text
+docker/tugraph-data   -> /var/lib/lgraph/data
+docker/tugraph-logs   -> /var/log/lgraph_log
+docker/tugraph-import -> /import
+docker/tugraph-tmp    -> /tmp
+```

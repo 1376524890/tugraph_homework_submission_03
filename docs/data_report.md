@@ -184,34 +184,42 @@ data/processed/tcg/query_views/causes_delta_5s.parquet.report.md
 
 ## TuGraph 导入
 
-HCG 和 TCG 数据统一使用 TuGraph 原生 `lgraph_import` 读取 CSV。Bolt 只保留
-`scripts/create_tugraph_schema.py`，用于在线创建图和 schema，不写入数据。
+HCG 和 TCG 数据统一使用 `scripts/import_tugraph_native.py`。该脚本通过 Bolt
+确保目标图存在，通过 Docker 调用 TuGraph 原生 `lgraph_import` 导入 CSV，不通过
+Bolt 写入数据。
 
-生成 HCG 导入配置：
+TuGraph 服务由仓库根目录的 Docker Compose 配置启动。Compose 会自动挂载
+`docker/tugraph-data`、`docker/tugraph-logs`、`docker/tugraph-import` 和
+`docker/tugraph-tmp`，其中 `/tmp` 使用宿主机目录，避免原生导入临时文件写入
+Docker overlay。
+
+启动服务：
 
 ```bash
-PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
+cd ..
+docker compose up -d
+```
+
+预演 HCG 导入命令：
+
+```bash
+PYTHONPATH=src python3 scripts/import_tugraph_native.py \
   --graph-type hcg \
-  --processed-dir docker/tugraph-import/hcg \
-  --local-import-root docker/tugraph-import \
-  --container-import-root /import \
-  --output docker/tugraph-import/hcg/import.json
+  --dry-run
 ```
 
-生成 TCG 导入配置：
+执行 HCG 导入：
 
 ```bash
-PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
-  --graph-type tcg \
-  --processed-dir docker/tugraph-import/tcg \
-  --local-import-root docker/tugraph-import \
-  --container-import-root /import \
-  --output docker/tugraph-import/tcg/import.json
+set -a
+. ./.env
+set +a
+
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg
 ```
 
-只建图/schema、不导入数据：
+TCG 全量导入使用同一入口，但执行前需要重新确认磁盘空间：
 
 ```bash
-PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type hcg
-PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type tcg
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg
 ```

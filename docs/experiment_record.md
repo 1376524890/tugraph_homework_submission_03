@@ -135,66 +135,41 @@ TCG 实际写出边数：
 
 当前结论：`data/processed` 可作为本次提交目录。
 
-## 2026-05-23 TuGraph 导入策略
+## 2026-05-23 Docker Compose 挂载与 TuGraph 导入
 
-HCG 和 TCG 数据导入统一使用 TuGraph 原生 `lgraph_import`。Bolt 不再承担 CSV
-数据写入，只保留 `scripts/create_tugraph_schema.py` 用于在线创建图和 schema。
-
-原生导入配置入口：
-
-```bash
-PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
-  --graph-type hcg \
-  --processed-dir docker/tugraph-import/hcg \
-  --local-import-root docker/tugraph-import \
-  --container-import-root /import \
-  --output docker/tugraph-import/hcg/import.json
-
-PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
-  --graph-type tcg \
-  --processed-dir docker/tugraph-import/tcg \
-  --local-import-root docker/tugraph-import \
-  --container-import-root /import \
-  --output docker/tugraph-import/tcg/import.json
-```
-
-在线只建图/schema：
-
-```bash
-PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type hcg
-PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type tcg
-```
-
-## 2026-05-23 TuGraph 导入目录挂载与配置生成
-
-为让运行中的 `tugraph-db` 容器访问原生导入目录，已重建同名容器并增加
-`docker/tugraph-import:/import` 挂载。未执行 `lgraph_import` 数据导入。
-
-当前 `tugraph-db` 挂载：
+TuGraph 服务由仓库根目录的 Docker Compose 配置管理。根目录 `.env` 指向本作业
+目录下的 Docker 子目录，服务启动时自动挂载数据、日志、导入目录和临时目录：
 
 ```text
 docker/tugraph-data   -> /var/lib/lgraph/data
 docker/tugraph-logs   -> /var/log/lgraph_log
 docker/tugraph-import -> /import
+docker/tugraph-tmp    -> /tmp
 ```
 
-为避免原生导入期间临时文件写入 Docker overlay，已创建宿主机临时目录：
+启动命令：
 
-```text
-docker/tugraph-tmp -> /tmp
+```bash
+cd ..
+docker compose up -d
 ```
 
-该目录位于 `/home` 分区，当前可用空间约 `77G`；运行 `lgraph_import` 的临时容器
-应显式增加 `-v "$PWD/docker/tugraph-tmp:/tmp"`。
+HCG 和 TCG 数据导入统一使用 `scripts/import_tugraph_native.py`。Bolt 不承担 CSV
+数据写入，只用于确保目标图存在；CSV 数据由 TuGraph 原生 `lgraph_import` 导入。
+导入脚本通过 Docker Compose 停止和启动 `tugraph-db`，临时导入容器使用同一组
+`/var/lib/lgraph/data`、`/import` 和 `/tmp` 挂载。
 
-临时停止状态备份容器已按后续清理要求删除：
+实际导入入口：
 
-```text
-tugraph-db-before-import-mount-20260523140024
+```bash
+PYTHONPATH=src python3 scripts/import_tugraph_native.py \
+  --graph-type hcg \
+  --dry-run
+
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg
 ```
 
-`docker/tugraph-import` 使用 `data/processed` 的硬链接视图，避免复制第二份
-全量 CSV 数据：
+`docker/tugraph-import` 使用 `data/processed` 的硬链接视图，避免复制全量 CSV 数据：
 
 ```text
 docker/tugraph-import/hcg/endpoints.csv
@@ -225,62 +200,12 @@ docker/tugraph-import/tcg/import.json
 /import/tcg/causes_full_parts/*.csv 共 135 个分片
 ```
 
-## 2026-05-23 原生导入前状态快照
-
-记录时间：
-
-```text
-2026-05-23 14:11:09 CST +0800
-```
-
-导入前未执行 `lgraph_import`。当前目标容器状态：
-
-| 容器 | 镜像 | 状态 | 端口 |
-| --- | --- | --- | --- |
-| `tugraph-db` | `custom-tugraph-runtime:latest` | Up 10 minutes | `7070`, `7687`, `9090` 映射到宿主机 |
-| `tugraph-db-old-20260522122320` | `custom-tugraph-runtime:latest` | Up 17 hours | 无宿主机端口映射 |
-
-目标容器详情：
-
-```text
-container_id=b6b8c0de2b28fbc1085f36b60d4d6e432125ba4a7ac1e1e9a98e5b1e99f7d80e
-image=custom-tugraph-runtime:latest
-image_id=b9ccb146827f
-cmd=["lgraph_server","--enable_plugin","true"]
-restart=always
-```
-
-目标容器挂载：
-
-```text
-/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-data:/var/lib/lgraph/data
-/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-logs:/var/log/lgraph_log
-/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-import:/import
-```
-
-长期运行的旧容器 `tugraph-db-old-20260522122320` 使用另一组宿主机目录：
-
-```text
-/home/marktom/tugraph/tugraph_data:/var/lib/lgraph/data
-/home/marktom/tugraph/tugraph_logs:/var/log/lgraph_log
-```
-
-磁盘空间快照：
+当前磁盘空间：
 
 | 路径 | 文件系统 | 总量 | 已用 | 可用 | 使用率 |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `/home` | `/dev/sdb1` | 196G | 109G | 77G | 59% |
 | `/` | `/dev/sda3` | 31G | 27G | 2.8G | 91% |
-| `/var/lib/lgraph/data` 容器内 | `/dev/sdb1` | 196G | 109G | 77G | 59% |
-| `/import` 容器内 | `/dev/sdb1` | 196G | 109G | 77G | 59% |
-| `/tmp` 长期运行容器内 | Docker overlay | 31G | 27G | 2.8G | 91% |
-
-注意：长期运行的 `tugraph-db` 容器没有挂载 `/tmp`。执行原生导入时应使用
-README 中的临时 `docker run --rm` 导入容器，并显式挂载：
-
-```bash
--v "$PWD/docker/tugraph-tmp:/tmp"
-```
 
 宿主机目录规模：
 
@@ -314,28 +239,40 @@ docker/tugraph-import total: 33.27 GiB
 docker/tugraph-import/tcg: 32.81 GiB
 ```
 
-当前 git 工作区在记录快照时无未提交变更。
+## 2026-05-23 Docker Compose 启动与挂载确认
 
-导入前建议的回滚信息：
-
-1. 如果 `lgraph_import` 失败且数据库目录不可用，先停止服务：
-
-```bash
-docker stop tugraph-db
-```
-
-2. 保留失败现场用于排查：
+执行 `docker compose up -d --build` 时，构建卡在 Dockerfile 第 6 步
+`yum install`，该步骤需要从 CentOS/EPEL archive 下载约 106M 依赖；由于当前已有
+可用的 `custom-tugraph-runtime:latest` 镜像，服务启动改为直接使用现有镜像：
 
 ```bash
-mv docker/tugraph-data docker/tugraph-data-failed-$(date +%Y%m%d%H%M%S)
-mkdir -p docker/tugraph-data
+docker compose up -d
 ```
 
-3. 重新启动空数据目录的服务容器：
+当前 `docker-compose.yml` 默认不触发构建，只负责用 Docker Compose 管理
+`tugraph-db` 服务和挂载目录。已删除手工创建的同名容器，重新由 Compose 创建并
+启动 `tugraph-db`。
 
-```bash
-docker start tugraph-db
+启动确认：
+
+| 项目 | 结果 |
+| --- | --- |
+| Compose 服务 | `tugraph-db` running |
+| HTTP 端口 | `7070` 返回 `200` |
+| Bolt 端口 | `7687` open |
+| RPC 端口 | `9090` open |
+| `/import/hcg/import.json` | 可见 |
+| `/import/tcg/import.json` | 可见 |
+| TCG CAUSES CSV 分片 | 135 |
+
+容器内挂载确认：
+
+```text
+/var/lib/lgraph/data -> /dev/sdb1 196G 109G 77G 59%
+/var/log/lgraph_log  -> /dev/sdb1 196G 109G 77G 59%
+/import              -> /dev/sdb1 196G 109G 77G 59%
+/tmp                 -> /dev/sdb1 196G 109G 77G 59%
 ```
 
-4. 如需恢复到本次导入前的空目标状态，可使用当前记录：导入前
-`docker/tugraph-data` 仅约 `11M`，主要包含 TuGraph 元数据和插件文件。
+`/tmp` 写入测试已通过，确认临时目录使用宿主机
+`docker/tugraph-tmp` 挂载，不再写入 Docker overlay。
