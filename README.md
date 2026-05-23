@@ -1,9 +1,30 @@
 # TuGraph Homework Submission 03
 
-本项目基于 Unicauca 87 属性网络流数据集，生成两类可用于 TuGraph 导入和后续分析的图数据：
+本项目基于 Unicauca 87 属性网络流数据集，构建两类可导入 TuGraph 的图数据：
 
 - HCG：Host Communication Graph，以 `{IP, port}` 端点为顶点，以端点之间的聚合通信关系为有向边。
 - TCG：Traffic Causality Graph，以每条 flow 记录为顶点，以 flow 之间的 CR、PR、DHR、SHR 因果关系为有向边。
+
+实验过程统一维护在 [docs/experiment_record.md](docs/experiment_record.md)。本 README 只保留当前可复现流程，不描述版本切换或旧方案。
+
+## 1. 目录说明
+
+| 路径 | 说明 |
+| --- | --- |
+| `data/raw/` | 原始数据，只作为输入读取。默认文件为 `Dataset-Unicauca-Version2-87Atts.csv`。 |
+| `data/processed/hcg/` | HCG 中间 CSV：`endpoints.csv`、`communicates.csv`。 |
+| `data/processed/tcg/` | TCG 中间 CSV：`flows.csv`、`causes_full_parts/`。 |
+| `data/processed/reports/` | TCG 边数量估算报告。 |
+| `data/exports/` | 查询视图或导出结果。 |
+| `docker/tugraph-data/` | Docker Compose 挂载到 `/var/lib/lgraph/data` 的 TuGraph 数据目录。 |
+| `docker/tugraph-logs/` | Docker Compose 挂载到 `/var/log/lgraph_log` 的 TuGraph 日志目录。 |
+| `docker/tugraph-import/` | Docker Compose 挂载到 `/import` 的原生导入 CSV 目录。 |
+| `docker/tugraph-tmp/` | Docker Compose 挂载到 `/tmp` 的临时目录，避免大文件写入 Docker overlay。 |
+| `scripts/` | 数据检查、CSV 生成、查询视图、TuGraph 原生导入入口脚本。 |
+| `src/tugraph_homework/` | 共享转换和通用工具代码。 |
+| `docs/` | 数据结构、目录规划、图建模说明和实验记录。 |
+
+## 2. 数据描述
 
 默认原始数据文件：
 
@@ -11,39 +32,87 @@
 data/raw/Dataset-Unicauca-Version2-87Atts.csv
 ```
 
-## 目录
+当前数据规模：
 
-| 路径 | 说明 |
+| 指标 | 值 |
+| --- | ---: |
+| 原始 CSV 大小 | 1,767,404,086 bytes |
+| 数据行数 | 3,577,296 |
+| 字段数 | 87 |
+| 唯一 `{IP, port}` 端点数 | 935,600 |
+| 唯一 `Flow.ID` 数 | 1,522,917 |
+
+`Flow.ID` 会重复，不能作为 TCG 顶点主键。脚本使用 `record_id` 作为 Flow 主键；当输入缺少 `record_id` 时，按原始行号生成稳定 ID，例如 `rec_0000000001`。
+
+检查数据：
+
+```bash
+cd /home/marktom/tugraph/tugraph_homework_submission_03
+PYTHONPATH=src python3 scripts/inspect_dataset.py --sample-rows 200000
+```
+
+HCG 建模：
+
+| 元素 | 说明 |
 | --- | --- |
-| `data/raw/` | 原始数据，只作为输入读取。 |
-| `data/processed/hcg/` | HCG 中间文件：`endpoints.csv`、`communicates.csv`。 |
-| `data/processed/tcg/` | TCG 中间文件：`flows.csv`、`causes_full_parts/`。 |
-| `data/processed/reports/` | TCG 边数量估算报告。 |
-| `data/exports/` | 导出结果。 |
-| `scripts/` | 数据检查、构图、查询视图和 TuGraph 原生导入入口脚本。 |
-| `src/tugraph_homework/` | 共享转换和通用工具代码。 |
-| `docs/` | 数据结构、目录规划、图建模说明和唯一实验记录。 |
+| `Endpoint` 顶点 | 每个 `{IP, port}` 端点一个顶点，主键为 `endpoint_id`。 |
+| `COMMUNICATES` 边 | 按 `(src_endpoint, dst_endpoint)` 聚合的有向通信边。 |
 
-实验过程统一维护在 [docs/experiment_record.md](docs/experiment_record.md)。后续数据下载、处理、校验、导入和查询实验只追加或更新这一个实验记录文档，避免多份记录相互不一致。
+TCG 建模：
 
-## 环境与容器启动
+| 元素 | 说明 |
+| --- | --- |
+| `Flow` 顶点 | 每条 flow 记录一个顶点，主键为 `record_id`。 |
+| `CAUSES` 边 | flow 之间按 CR、PR、DHR、SHR 规则生成的有向因果边。 |
 
-脚本通过 `PYTHONPATH=src` 运行。生成 Parquet 或读取 Parquet 查询视图时需要 `pandas` 和 `pyarrow`；TuGraph 导入入口通过 Bolt 创建图、通过 Docker 调用原生 `lgraph_import` 导入 CSV，因此需要 `neo4j` Python 驱动和 Docker。
+TCG 关系规则：
 
-TuGraph 连接信息可写入本地 `.env`：
+| 关系 | 窗口 | 规则 |
+| --- | ---: | --- |
+| `CR` | 5 秒 | 协议相同，五元组方向相反。 |
+| `PR` | 1 秒 | `dstIp(f1) == srcIp(f2)`。 |
+| `DHR` | 1 秒 | `srcIp(f1) == srcIp(f2)` 且 `srcPort(f1) != srcPort(f2)`。 |
+| `SHR` | 5 秒 | `srcIp(f1) == srcIp(f2)` 且 `srcPort(f1) == srcPort(f2)`。 |
+
+同一对 flow 同时满足多个关系时，只采用优先级最高的关系，优先级为 `CR > PR > DHR > SHR`。边方向由时间决定：较早 flow 指向较晚 flow；时间相同时按 `record_id` 字典序确定方向。`delta_seconds` 作为边属性保存。
+
+当前全量 TCG 估算：
+
+| 指标 | 值 |
+| --- | ---: |
+| Flow 数 | 3,577,296 |
+| CR 候选边 | 346,014 |
+| PR 候选边 | 46,946,678 |
+| DHR 候选边 | 54,938,804 |
+| SHR 候选边 | 40,990,482 |
+| 候选边总数 | 143,221,978 |
+| 预估 CSV 大小 | 24.01 GiB |
+
+## 3. 环境和容器
+
+脚本通过 `PYTHONPATH=src` 运行。TuGraph 导入入口通过 Bolt 确认目标图，通过 Docker 调用原生 `lgraph_import` 导入 CSV，因此本地 Python 环境需要 `neo4j` 驱动。
+
+安装依赖：
 
 ```bash
-cp .env.example .env
+python3 -m pip install neo4j -i https://mirrors.aliyun.com/pypi/simple
 ```
 
-TuGraph 服务由仓库根目录的 `docker-compose.yml` 管理。根目录 `.env` 已指定作业目录下的持久化路径，启动时会自动挂载数据、日志、导入目录和临时目录：
+TuGraph 服务由仓库根目录的 Docker Compose 管理：
 
 ```bash
-cd ..
+cd /home/marktom/tugraph
 docker compose up -d
+docker compose ps
 ```
 
-挂载关系：
+确认挂载：
+
+```bash
+docker exec tugraph-db sh -lc 'for p in /var/lib/lgraph/data /var/log/lgraph_log /import /tmp; do printf "%s -> " "$p"; df -h "$p" | tail -1; done'
+```
+
+期望挂载关系：
 
 ```text
 tugraph_homework_submission_03/docker/tugraph-data   -> /var/lib/lgraph/data
@@ -52,144 +121,16 @@ tugraph_homework_submission_03/docker/tugraph-import -> /import
 tugraph_homework_submission_03/docker/tugraph-tmp    -> /tmp
 ```
 
-## 数据检查
+`/tmp` 应显示在宿主机 `/home` 所在文件系统上，而不是 Docker overlay。
 
-查看数据规模、字段和关键字段统计：
+## 4. CSV 生成
 
-```bash
-PYTHONPATH=src python3 scripts/inspect_dataset.py --sample-rows 200000
-```
+CSV 统一由 `scripts/prepare_processed_csv.py` 生成。该脚本只生成中间文件，不连接 TuGraph，也不写入 TuGraph 数据目录。
 
-## 资源预估
-
-当前数据集共 3,577,296 条 flow，原始 CSV 约 1.7G。本机环境为 4 核 CPU、约 10 GiB 可用内存、`/home` 剩余约 115G。以下预估基于当前数据文件的流式统计结果：
-
-| 步骤 | 规模 | 预计落盘 | 预计耗时 | 风险 |
-| --- | ---: | ---: | ---: | --- |
-| 数据检查 | 读取 CSV 抽样或全量扫描 | 不新增大文件 | 数十秒到数分钟 | 低 |
-| HCG 构建 | 935,600 个端点，1,716,084 条聚合边 | 约 0.7G 到 1.5G | 约数分钟 | 中低 |
-| TCG 估算 | 3,577,296 条 flow 计数统计 | 仅报告文件 | 约 2 到 4 分钟 | 低 |
-| TCG 全关系构建 | 约 143,221,978 条候选边 | Parquet 约 8.40 GiB，CSV 约 24.01 GiB | 预计较长 | 中高 |
-| TCG 查询视图 | 取决于输入边文件和过滤条件 | 通常小于输入边文件 | 分钟级到小时级 | 取决于输入规模 |
-| TuGraph 原生导入 HCG | 约 265 万条点边记录 | TuGraph 存储会大于 CSV | 分钟级 | 中 |
-| TuGraph 原生导入 TCG | 约 357 万 Flow 点和按窗口生成的 CAUSES 边 | TuGraph 存储会大于中间文件 | 取决于边数量 | 中高 |
-
-TCG 构建按关系使用时间窗口：`CR=5,PR=1,DHR=1,SHR=5`。`delta_seconds` 会作为边属性保存。脚本设置了候选边安全阈值：估算的待构建边数超过 `--max-candidate-edges` 时会拒绝执行 build。当前全关系构建需要把阈值设置到 150,000,000 以上。
-
-推荐安全运行方式：
+生成提交目录下的 HCG 和 TCG CSV：
 
 ```bash
-nice -n 10 ionice -c2 -n7 env PYTHONPATH=src python3 scripts/build_tcg.py \
-  --input data/raw/Dataset-Unicauca-Version2-87Atts.csv \
-  --mode estimate \
-  --output data/processed/tcg
-```
-
-## HCG
-
-HCG 将每个 `{IP, port}` 端点建模为 `Endpoint` 顶点。任意两个端点之间只要存在 flow 通信，就按 `(src_endpoint, dst_endpoint)` 聚合为一条有向 `COMMUNICATES` 边。
-
-生成 HCG 中间 CSV：
-
-```bash
-PYTHONPATH=src python3 scripts/build_hcg.py \
-  --input data/raw/Dataset-Unicauca-Version2-87Atts.csv \
-  --output data/processed/hcg
-```
-
-输出文件：
-
-```text
-data/processed/hcg/endpoints.csv
-data/processed/hcg/communicates.csv
-```
-
-HCG 使用 flow 级统计数据近似通信关系。原始数据如缺少 TCP flags 或 SYN 字段，脚本不会构造额外的 SYN 判定。
-
-## TCG
-
-TCG 将每条 flow 记录建模为 `Flow` 顶点，主键为 `record_id`。如果输入数据没有 `record_id`，脚本会按原始行号生成稳定 ID，例如 `rec_0000000001`。原始 `flow_id` 作为普通属性写入。
-
-`CAUSES` 边使用四类关系，优先级为 `CR > PR > DHR > SHR`：
-
-| 关系 | 规则 |
-| --- | --- |
-| `CR` | 协议相同，五元组方向相反。 |
-| `PR` | `dstIp(f1) == srcIp(f2)`。 |
-| `DHR` | `srcIp(f1) == srcIp(f2)` 且 `srcPort(f1) != srcPort(f2)`。 |
-| `SHR` | `srcIp(f1) == srcIp(f2)` 且 `srcPort(f1) == srcPort(f2)`。 |
-
-同一对 flow 同时满足多个关系时，只采用优先级最高的关系。边方向由时间决定：较早 flow 指向较晚 flow；时间相同时按 `record_id` 字典序确定方向。`delta_seconds` 作为边属性保存。
-
-构建窗口：
-
-| 关系 | 窗口 |
-| --- | ---: |
-| `CR` | 5 秒 |
-| `PR` | 1 秒 |
-| `DHR` | 1 秒 |
-| `SHR` | 5 秒 |
-
-先估算 TCG 边数量：
-
-```bash
-PYTHONPATH=src python3 scripts/build_tcg.py \
-  --input data/raw/Dataset-Unicauca-Version2-87Atts.csv \
-  --mode estimate \
-  --output data/processed/tcg
-```
-
-估算报告输出到：
-
-```text
-data/processed/reports/tcg_edge_estimation_report.md
-```
-
-生成小规模检查结果：
-
-```bash
-PYTHONPATH=src python3 scripts/build_tcg.py \
-  --input data/raw/Dataset-Unicauca-Version2-87Atts.csv \
-  --mode build \
-  --relation-types CR \
-  --output data/processed/tcg \
-  --output-format parquet \
-  --partition-by relation_type
-```
-
-生成完整 TCG 分区结果：
-
-```bash
-PYTHONPATH=src python3 scripts/build_tcg.py \
-  --input data/raw/Dataset-Unicauca-Version2-87Atts.csv \
-  --mode build \
-  --relation-types CR,PR,DHR,SHR \
-  --output data/processed/tcg \
-  --output-format parquet \
-  --partition-by relation_type \
-  --chunk-size 1000000 \
-  --max-candidate-edges 150000000
-```
-
-输出目录：
-
-```text
-data/processed/tcg/flows.parquet
-data/processed/tcg/causes_full_parts/relation_type=CR/
-data/processed/tcg/causes_full_parts/relation_type=PR/
-data/processed/tcg/causes_full_parts/relation_type=DHR/
-data/processed/tcg/causes_full_parts/relation_type=SHR/
-```
-
-全关系构建推荐使用 Parquet 输出。
-
-## 统一 CSV 生成
-
-CSV 生成功能已完成，统一入口是 `scripts/prepare_processed_csv.py`。该脚本只生成
-中间 CSV，不连接 TuGraph，也不写入 TuGraph 数据目录。需要一次性生成 HCG 和 TCG
-的 CSV 中间文件时，可以运行：
-
-```bash
+cd /home/marktom/tugraph/tugraph_homework_submission_03
 PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
   --csv data/raw/Dataset-Unicauca-Version2-87Atts.csv \
   --graph all \
@@ -197,6 +138,43 @@ PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
   --relation-types CR,PR,DHR,SHR \
   --chunk-size 1000000 \
   --max-candidate-edges 150000000
+```
+
+输出结构：
+
+```text
+data/processed/hcg/endpoints.csv
+data/processed/hcg/communicates.csv
+data/processed/tcg/flows.csv
+data/processed/tcg/causes_full_parts/relation_type=CR/*.csv
+data/processed/tcg/causes_full_parts/relation_type=PR/*.csv
+data/processed/tcg/causes_full_parts/relation_type=DHR/*.csv
+data/processed/tcg/causes_full_parts/relation_type=SHR/*.csv
+data/processed/reports/tcg_edge_estimation_report.md
+```
+
+给 TuGraph 原生导入准备 CSV 时，输出到 Docker 挂载目录：
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
+  --csv data/raw/Dataset-Unicauca-Version2-87Atts.csv \
+  --graph all \
+  --output-root docker/tugraph-import \
+  --relation-types CR,PR,DHR,SHR \
+  --chunk-size 1000000 \
+  --max-candidate-edges 150000000
+```
+
+导入目录结构：
+
+```text
+docker/tugraph-import/hcg/endpoints.csv
+docker/tugraph-import/hcg/communicates.csv
+docker/tugraph-import/tcg/flows.csv
+docker/tugraph-import/tcg/causes_full_parts/relation_type=CR/*.csv
+docker/tugraph-import/tcg/causes_full_parts/relation_type=PR/*.csv
+docker/tugraph-import/tcg/causes_full_parts/relation_type=DHR/*.csv
+docker/tugraph-import/tcg/causes_full_parts/relation_type=SHR/*.csv
 ```
 
 小样本 smoke test：
@@ -212,102 +190,60 @@ PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
   --max-candidate-edges 10000000
 ```
 
-当前验证结果：HCG 生成 1,297 个 Endpoint、1,471 条 COMMUNICATES；TCG 生成
-2,000 个 Flow，以及 CR=686、PR=27,132、DHR=17,516、SHR=43,352 条 CAUSES
-边。输出表头与字段定义一致，并按 `causes_full_parts/relation_type=*/part-*.csv`
-分区。
+当前 smoke test 结果：
 
-输出结构：
+| 输出 | 结果 |
+| --- | ---: |
+| HCG Endpoint | 1,297 |
+| HCG COMMUNICATES | 1,471 |
+| TCG Flow | 2,000 |
+| TCG CR 边 | 686 |
+| TCG PR 边 | 27,132 |
+| TCG DHR 边 | 17,516 |
+| TCG SHR 边 | 43,352 |
 
-```text
-data/processed/hcg/endpoints.csv
-data/processed/hcg/communicates.csv
-data/processed/tcg/flows.csv
-data/processed/tcg/causes_full_parts/relation_type=CR/*.csv
-data/processed/tcg/causes_full_parts/relation_type=PR/*.csv
-data/processed/tcg/causes_full_parts/relation_type=DHR/*.csv
-data/processed/tcg/causes_full_parts/relation_type=SHR/*.csv
-data/processed/reports/tcg_edge_estimation_report.md
-```
+TCG 生成会先估算候选边数量。如果超过 `--max-candidate-edges`，脚本会停止构建并保留估算报告；确认磁盘和运行时间足够后，再提高阈值或使用 `--force-large-build`。
 
-TCG 生成会先估算候选边数量；如果超过 `--max-candidate-edges` 会停止构建并保留
-估算报告。确认磁盘和运行时间足够后，再提高阈值或使用 `--force-large-build`。
+## 5. 导入执行
 
-## 查询视图
+HCG 和 TCG 统一使用 `scripts/import_tugraph_native.py`。脚本会：
 
-查询视图从 `causes_full_parts` 派生，用于按 `delta_seconds`、关系类型和前驱/后继数量生成子图：
+1. 生成 `docker/tugraph-import/<graph-type>/import.json`。
+2. 通过 Bolt 确保目标图存在。
+3. 通过 Docker Compose 停止 `tugraph-db`。
+4. 启动临时 Docker 容器执行 `lgraph_import`。
+5. 通过 Docker Compose 重新启动 `tugraph-db`。
 
-```bash
-PYTHONPATH=src python3 scripts/query_tcg_by_delta.py \
-  --input data/processed/tcg/causes_full_parts \
-  --output data/processed/tcg/query_views/causes_delta_5s.parquet \
-  --max-delta-seconds 5 \
-  --relation-types CR,PR,DHR,SHR
-```
-
-报告会写到查询视图旁边：
+导入脚本会给临时导入容器挂载：
 
 ```text
-data/processed/tcg/query_views/causes_delta_5s.parquet.report.md
+docker/tugraph-data   -> /var/lib/lgraph/data
+docker/tugraph-import -> /import
+docker/tugraph-tmp    -> /tmp
 ```
 
-## TuGraph 导入
+### 5.1 HCG 导入
 
-HCG 和 TCG 数据统一使用 `scripts/import_tugraph_native.py`。该脚本先通过 Bolt
-确保目标图存在，再通过 Docker Compose 停止 `tugraph-db`，用 TuGraph 原生
-`lgraph_import` 导入 CSV，最后通过 Docker Compose 启动服务。Bolt 不写入 CSV 数据。
-
-手动复现前确认当前 Python 环境可导入 Bolt 驱动：
-
-```bash
-python3 -m pip install neo4j -i https://mirrors.aliyun.com/pypi/simple
-```
-
-启动 TuGraph 服务并确认挂载：
-
-```bash
-cd /home/marktom/tugraph
-docker compose up -d
-docker compose ps
-docker exec tugraph-db sh -lc 'for p in /var/lib/lgraph/data /var/log/lgraph_log /import /tmp; do printf "%s -> " "$p"; df -h "$p" | tail -1; done'
-```
-
-`/tmp` 应显示在宿主机 `/home` 所在文件系统上，而不是 Docker overlay。
-
-生成 HCG 和 TCG CSV：
-
-```bash
-PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
-  --csv data/raw/Dataset-Unicauca-Version2-87Atts.csv \
-  --graph all \
-  --output-root docker/tugraph-import \
-  --relation-types CR,PR,DHR,SHR \
-  --chunk-size 1000000 \
-  --max-candidate-edges 150000000
-```
-
-导入前可先打印实际会执行的 Docker 命令：
-
-```bash
-PYTHONPATH=src python3 scripts/import_tugraph_native.py \
-  --graph-type hcg \
-  --dry-run
-```
-
-执行 HCG 导入：
+预演 HCG 导入：
 
 ```bash
 cd /home/marktom/tugraph/tugraph_homework_submission_03
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg --dry-run
+```
+
+首次执行 HCG 导入：
+
+```bash
 PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg
 ```
 
-如果当前环境已经导入过 HCG，再次复现导入时需要显式确认覆盖：
+如果当前环境已经导入过 HCG，再次导入需要显式确认覆盖：
 
 ```bash
 PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg --force
 ```
 
-导入后验证 HCG 点边数量：
+验证 HCG 点边数量：
 
 ```bash
 PYTHONPATH=src python3 - <<'PY'
@@ -324,26 +260,110 @@ finally:
 PY
 ```
 
-当前 HCG 导入验证结果应为：
+当前 HCG 验证结果：
 
 ```text
 Endpoint=935600
 COMMUNICATES=1716084
 ```
 
-导入脚本会生成 `docker/tugraph-import/<graph-type>/import.json`。服务容器由
-Docker Compose 自动挂载 `/import` 和 `/tmp`；临时导入容器也使用同一组
-`docker/tugraph-import:/import`、`docker/tugraph-tmp:/tmp` 挂载，避免大规模导入
-临时文件写入 Docker overlay。当前全量 TCG CSV 预估约 24.01 GiB，TuGraph 导入后
-存储会进一步放大；TCG 全量导入前应确认磁盘空间和目标图容量。
+### 5.2 TCG 导入
 
-## 校验重点
+TCG 全量导入数据量明显大于 HCG。执行前确认 `/home` 可用空间、`docker/tugraph-import` 文件完整性和 `/tmp` 挂载：
 
-- `flows.csv` 或 `flows.parquet` 中的 `record_id` 必须唯一。
-- `flow_id` 不作为 Flow 主键。
+```bash
+cd /home/marktom/tugraph
+df -h /home
+du -sh tugraph_homework_submission_03/docker/tugraph-import
+docker exec tugraph-db sh -lc 'df -h /var/lib/lgraph/data /import /tmp'
+docker exec tugraph-db sh -lc 'ls -lh /import/tcg/import.json /import/tcg/flows.csv; find /import/tcg/causes_full_parts -type f -name "*.csv" | wc -l'
+```
+
+当前 TCG 导入文件状态：
+
+| 项目 | 值 |
+| --- | ---: |
+| `docker/tugraph-import/tcg/flows.csv` 行数，含表头 | 3,577,297 |
+| `docker/tugraph-import/tcg/causes_full_parts/**/*.csv` 分片数 | 135 |
+| `docker/tugraph-import/tcg/import.json` 配置文件数 | 136 |
+
+预演 TCG 导入：
+
+```bash
+cd /home/marktom/tugraph/tugraph_homework_submission_03
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --dry-run
+```
+
+首次执行 TCG 导入：
+
+```bash
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg
+```
+
+如果当前环境已经导入过 TCG，再次导入需要显式确认覆盖：
+
+```bash
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --force
+```
+
+验证 TCG 点边数量：
+
+```bash
+PYTHONPATH=src python3 - <<'PY'
+from neo4j import GraphDatabase
+from tugraph_homework.common import DEFAULT_URI, DEFAULT_USER, DEFAULT_PASSWORD
+
+driver = GraphDatabase.driver(DEFAULT_URI, auth=(DEFAULT_USER, DEFAULT_PASSWORD))
+try:
+    with driver.session(database="tcg") as session:
+        print("Flow=", session.run("MATCH (n:Flow) RETURN count(n) AS c").single()["c"])
+        print("CAUSES=", session.run("MATCH ()-[r:CAUSES]->() RETURN count(r) AS c").single()["c"])
+finally:
+    driver.close()
+PY
+```
+
+预期 Flow 数为 `3,577,296`。CAUSES 边数以实际生成的 `causes_full_parts` 为准，当前 CSV 校验记录为 `134,240,414`。
+
+### 5.3 导入后服务检查
+
+每次导入完成后执行：
+
+```bash
+cd /home/marktom/tugraph
+docker compose ps
+curl --max-time 5 -s -o /tmp/tugraph-http-body -w 'http_code=%{http_code}\n' http://127.0.0.1:7070/
+timeout 3 bash -lc '</dev/tcp/127.0.0.1/7687' && echo bolt_port_open
+```
+
+TuGraph 停止或启动过程中可能输出 Python plugin 的 `KeyboardInterrupt` 日志，这是服务停止时插件任务进程被中断的日志。只要 `docker compose ps` 显示服务运行、HTTP/Bolt 检查通过、点边数量可查询，即可认为导入流程完成。
+
+## 6. 查询视图
+
+查询视图从 TCG 的 `causes_full_parts` 派生，用于按 `delta_seconds`、关系类型和前驱/后继数量生成子图：
+
+```bash
+cd /home/marktom/tugraph/tugraph_homework_submission_03
+PYTHONPATH=src python3 scripts/query_tcg_by_delta.py \
+  --input data/processed/tcg/causes_full_parts \
+  --output data/processed/tcg/query_views/causes_delta_5s.parquet \
+  --max-delta-seconds 5 \
+  --relation-types CR,PR,DHR,SHR
+```
+
+报告会写到查询视图旁边：
+
+```text
+data/processed/tcg/query_views/causes_delta_5s.parquet.report.md
+```
+
+## 7. 校验重点
+
+- `flows.csv` 中的 `record_id` 必须唯一。
+- `flow_id` 只作为普通属性，不作为 Flow 主键。
 - `CAUSES` 不包含自环。
 - `relation_id` 必须唯一。
 - `delta_seconds` 作为边属性保存；查询视图可按该字段继续过滤。
 - TCG 构建前先查看 `data/processed/reports/tcg_edge_estimation_report.md`。
 
-更多字段说明见 [docs/graph_modeling.md](docs/graph_modeling.md) 和 [docs/data_report.md](docs/data_report.md)。
+更多字段说明见 [docs/graph_modeling.md](docs/graph_modeling.md)、[docs/dataset_structure.md](docs/dataset_structure.md) 和 [docs/data_report.md](docs/data_report.md)。
