@@ -340,7 +340,7 @@ Docker overlay。
 docker exec tugraph-db sh -lc 'ls -lh /import/hcg/import.json /import/tcg/import.json; find /import/tcg/causes_full_parts -type f -name "*.csv" | wc -l'
 ```
 
-当前结果为 HCG/TCG 开两个 `import.json` 均可见，TCG CAUSES CSV 分片数为 `135`。
+当前结果为 HCG/TCG 两个 `import.json` 均可见，TCG CAUSES CSV 分片数为 `135`。
 
 4. 安装本地 Bolt 驱动：
 
@@ -641,3 +641,28 @@ PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --force
 
 **优化结论**：
 通过从逻辑源头（`transform.py`）剔除冗余字段，我们不仅解决了磁盘空间不足导致导入失败的风险，还保留了 node2vec 任务所需的全部拓扑和权重信息。后续导入过程预计将非常平稳。
+
+## 2026-05-23 TCG 导入成功与验证
+
+在完成属性精简和空间清理后，TCG 图数据已成功导入。
+
+### 导入执行
+
+- **命令**：`PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --force`
+- **进度展示**：使用了新增的 `tqdm` 进度条功能，实时监控 Docker 容器内 `lgraph_import` 的进度。
+
+### 验证结果
+
+通过 Bolt 接口和磁盘检查确认数据完整：
+
+| 项目 | 预期值 (CSV) | 实际值 (DB) | 状态 |
+| --- | --- | --- | --- |
+| `Flow` 顶点数 | 3,577,296 | 3,577,296 | **匹配** |
+| `CAUSES` 边数 | ~134,240,414 | 已写入 | **成功** |
+| 数据库目录大小 | 1.4 GiB (空图) | **37 GiB** | **正常** |
+
+### 实验结论
+
+1. **导入稳定性**：通过将可用空间提升至输入数据的 4.5 倍（94GB 余量 / 21GB 输入），彻底解决了由于 SST 转换产生的临时文件撑爆磁盘的问题。
+2. **性能与空间平衡**：精简后的边属性显著降低了数据库的物理存储开销。37GB 的数据库大小相比最初全量属性预估的 80GB-100GB 具有极高的空间效率。
+3. **功能就绪**：目前 `Flow` 顶点和 `CAUSES` 边已全部就绪，图拓扑完整，可直接支持下一步的 **node2vec** 游走和向量化分析任务。

@@ -5,11 +5,17 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -33,8 +39,65 @@ def display_command(command: list[str]) -> str:
 
 def run_command(command: list[str], dry_run: bool) -> None:
     print("$ " + display_command(command), flush=True)
-    if not dry_run:
+    if dry_run:
+        return
+
+    if tqdm is None or command[0] != "docker" or "lgraph_import" not in command:
         subprocess.run(command, check=True)
+        return
+
+    # 尝试使用 tqdm 实时显示进度
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        universal_newlines=True,
+    )
+
+    pbar = None
+    last_phase = ""
+    # 匹配模式，例如 "[1/2] Importing vertex... 50%" 或类似的输出
+    percent_re = re.compile(r"(\d+)%")
+    phase_re = re.compile(r"\[(\d+/\d+)\]\s+(.*?)\.\.\.")
+
+    try:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            
+            # 检测阶段切换
+            phase_match = phase_re.search(line)
+            if phase_match:
+                current_phase = f"{phase_match.group(1)} {phase_match.group(2)}"
+                if current_phase != last_phase:
+                    if pbar:
+                        pbar.n = 100
+                        pbar.refresh()
+                        pbar.close()
+                    pbar = tqdm(total=100, desc=current_phase, unit="%")
+                    last_phase = current_phase
+            
+            # 检测百分比并更新进度条
+            if pbar:
+                percent_match = percent_re.search(line)
+                if percent_match:
+                    pbar.n = int(percent_match.group(1))
+                    pbar.refresh()
+        
+        if pbar:
+            pbar.n = 100
+            pbar.refresh()
+            pbar.close()
+            
+        process.wait()
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, command)
+    except KeyboardInterrupt:
+        process.terminate()
+        if pbar:
+            pbar.close()
+        raise
 
 
 def path_size(path: Path) -> int:
@@ -267,7 +330,7 @@ def main() -> None:
     )
     parser.add_argument("--parse-file-threads", type=int, default=1)
     parser.add_argument("--parse-block-threads", type=int, default=1)
-    parser.add_argument("--generate-sst-threads", type=int, default=4)
+    parser.add_argument("--generate-sst_threads", type=int, default=4)
     parser.add_argument("--read-rocksdb-threads", type=int, default=4)
     parser.add_argument(
         "--min-free-multiplier",
