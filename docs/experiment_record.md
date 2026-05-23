@@ -666,3 +666,171 @@ PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --force
 1. **导入稳定性**：通过将可用空间提升至输入数据的 4.5 倍（94GB 余量 / 21GB 输入），彻底解决了由于 SST 转换产生的临时文件撑爆磁盘的问题。
 2. **性能与空间平衡**：精简后的边属性显著降低了数据库的物理存储开销。37GB 的数据库大小相比最初全量属性预估的 80GB-100GB 具有极高的空间效率。
 3. **功能就绪**：目前 `Flow` 顶点和 `CAUSES` 边已全部就绪，图拓扑完整，可直接支持下一步的 **node2vec** 游走和向量化分析任务。
+
+## 2026-05-24 HCG Random Walk C++ 存储过程准备
+
+为了在 TuGraph 服务端生成 HCG random walks，并供后续 Python word2vec/skip-gram 训练 Endpoint embedding，新增了两版 C++ 存储过程源码和使用文档。
+
+### 新增文件
+
+| 文件 | 说明 |
+| --- | --- |
+| `procedures/hcg_weighted_walk_v1.cpp` | weighted first-order random walk，作为 DeepWalk / node2vec `p=1,q=1` 基线 |
+| `procedures/hcg_node2vec_walk_v2.cpp` | node2vec second-order random walk，支持 `p`、`q` 参数 |
+| `docs/hcg_random_walk_cpp_procedure_usage.md` | WebUI 上传、smoke test、全量参数和 word2vec 训练说明 |
+| `docs/hcg_random_walk_procedure_env_check.md` | TuGraph C++ procedure 环境检查报告 |
+| `scripts/check_walks_file.py` | walks 文件质量检查脚本 |
+| `scripts/build_hcg_cpp_plugins_in_docker.sh` | 在 `tugraph-db` 容器内编译 `.so` 的脚本 |
+
+### 实现范围
+
+两个 C++ procedure 均只处理 HCG：
+
+- 点标签：`Endpoint`
+- 点 token 字段：`endpoint_id`
+- 边标签：`COMMUNICATES`
+- 默认边权字段：`flow_count`
+- 可选边权字段：`total_bytes`
+
+共同支持参数：
+
+- `output_path`
+- `id_map_path`
+- `walk_length`
+- `num_walks`
+- `weighted`
+- `weight_field`
+- `weight_transform`
+- `directed`
+- `seed`
+- `max_start_nodes`
+- `use_endpoint_id_token`
+- `return_preview_lines`
+
+v2 额外使用：
+
+- `p`
+- `q`
+
+### WebUI 编译问题与处理
+
+尝试通过 TuGraph WebUI 上传源码编译 `hcg_weighted_walk_v1.cpp` 时失败，报错为：
+
+```text
+fatal error: boost/date_time/posix_time/posix_time.hpp: No such file or directory
+```
+
+进入 Docker 检查后确认：
+
+- 当前运行容器：`tugraph-db`
+- 镜像：`custom-tugraph-runtime:latest`
+- 系统：CentOS 7
+- TuGraph 头文件路径：`/usr/local/include/lgraph/lgraph.h`
+- 容器中缺少 Boost 头：`/usr/include/boost/...` 和 `/usr/local/include/boost/...` 均不存在
+- 容器可能无法连接外网，因此不依赖在线 `yum install boost-devel`
+
+由于 TuGraph C++ 头文件会通过 `/usr/local/include/tools/lgraph_log.h` 引入 Boost Log，同时 `/usr/local/include/lgraph/lgraph_spatial.h` 会引入 Boost Geometry，本次采用容器内本地编译 `.so` 的方式绕过 WebUI 源码编译问题。
+
+### 本地 `.so` 编译方案
+
+新增编译期 stub：
+
+| 文件 | 用途 |
+| --- | --- |
+| `build/tugraph_stub_include/tools/lgraph_log.h` | 编译期绕过 Boost Log 头 |
+| `build/tugraph_stub_include/boost/algorithm/hex.hpp` | 编译期提供最小 `boost::algorithm::hex` |
+| `build/tugraph_stub_include/lgraph/lgraph_spatial.h` | 编译期绕过 Boost Geometry 头 |
+
+编译命令统一封装为：
+
+```bash
+bash scripts/build_hcg_cpp_plugins_in_docker.sh
+```
+
+编译环境使用 `tugraph-db` 容器内的 `/usr/local/include` 和系统 C++ runtime。由于 TuGraph 4.5 头文件使用 `std::optional` 和 `std::any`，编译参数使用 `-std=c++17`。
+
+生成产物：
+
+| 文件 | 大小 | 状态 |
+| --- | ---: | --- |
+| `build/tugraph_cpp_plugins/hcg_weighted_walk_v1.so` | 283K | 已生成 |
+| `build/tugraph_cpp_plugins/hcg_node2vec_walk_v2.so` | 288K | 已生成 |
+
+验证结果：
+
+- 两个 `.so` 均为 x86-64 ELF shared object。
+- `nm -D` 检查均导出 `Process` 符号。
+- `ldd` 检查只依赖容器内标准运行库：`libstdc++`、`libm`、`libgcc_s`、`libc`。
+- 未执行 random walks。
+- 未修改 TuGraph 数据库数据。
+
+### 宿主机直接编译尝试
+
+根据“是否可以不进 Docker、直接在本地编译 `.so`”的需求，额外尝试了宿主机直接编译。
+
+宿主机环境：
+
+- Ubuntu 24.04
+- GCC 13.3.0
+- glibc 2.39
+- TuGraph include：`/home/marktom/tugraph/tugraph-db/include`
+
+宿主机编译需要额外参数：
+
+- `-std=c++17`
+- `-include optional`
+- `-include any`
+- `-Ibuild/tugraph_stub_include`
+- `-I/home/marktom/tugraph/tugraph-db/include`
+
+新增脚本：
+
+```bash
+bash scripts/build_hcg_cpp_plugins_local.sh
+```
+
+宿主机产物：
+
+| 文件 | 状态 |
+| --- | --- |
+| `build/tugraph_cpp_plugins_host/hcg_weighted_walk_v1.so` | 仅用于 ABI 验证，不上传 WebUI |
+| `build/tugraph_cpp_plugins_host/hcg_node2vec_walk_v2.so` | 仅用于 ABI 验证，不上传 WebUI |
+
+ABI 检查结果显示，宿主机产物会引用较新的运行时符号：
+
+- `GLIBC_2.38`
+- `GLIBC_2.32`
+- `GLIBCXX_3.4.32`
+- `GLIBCXX_3.4.29`
+
+即使使用 `-static-libstdc++ -static-libgcc`，仍然会引用较新的 glibc 符号。因此**不使用宿主机直接编译产物**，避免 TuGraph WebUI 加载 `.so` 时出现 glibc/libstdc++ ABI 问题。
+
+本项目后续 C++ procedure 的正式上传物统一使用 `tugraph-db` 容器内编译产物：
+
+- `build/tugraph_cpp_plugins/hcg_weighted_walk_v1.so`
+- `build/tugraph_cpp_plugins/hcg_node2vec_walk_v2.so`
+
+后续如果 C++ 源码发生修改，应执行：
+
+```bash
+bash scripts/build_hcg_cpp_plugins_in_docker.sh
+```
+
+不要使用 `build/tugraph_cpp_plugins_host/` 下的宿主机编译版本。
+
+### 后续执行建议
+
+1. 优先在 WebUI 上传 `build/tugraph_cpp_plugins/hcg_weighted_walk_v1.so`，过程名设置为 `hcg_weighted_walk_v1`，read-only。
+2. 先使用 `/tmp/hcg_walks_v1_smoke.txt`、`max_start_nodes=1000` 的 smoke test 参数。
+3. 若 v1 输出正常，再上传 `hcg_node2vec_walk_v2.so` 并使用 `p=1.0,q=1.0` 进行 v2 smoke test。
+4. 全量 HCG 运行前必须先跑 `max_start_nodes=1000` 和 `max_start_nodes=10000`。
+5. walks 生成后使用 `scripts/check_walks_file.py` 检查行数、平均长度、短 walk 比例和 token 覆盖。
+6. 通过后再调用 `scripts/train_word2vec_embeddings.py` 训练 Endpoint embedding。
+
+### 风险记录
+
+1. 当前 `.so` 方案依赖容器内 TuGraph runtime ABI，建议只在同一个 `custom-tugraph-runtime:latest` 或兼容镜像中使用。
+2. 编译期 stub 只用于绕过未安装 Boost 头的编译问题，不应替代 TuGraph 运行时库。
+3. 如果后续容器可安装 `boost-devel`，可以回到 WebUI 直接上传源码编译。
+4. v1 是 DeepWalk / node2vec `p=1,q=1` 基线；v2 才是严格 node2vec 二阶游走。
+5. 全量 HCG 约有近百万 Endpoint，`walk_length=20,num_walks=5` 时输出 token 可能接近上亿级，必须先做小规模验证。
