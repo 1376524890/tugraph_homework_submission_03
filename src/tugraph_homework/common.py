@@ -42,17 +42,6 @@ DEFAULT_USER = os.getenv("TUGRAPH_USER", "")
 DEFAULT_PASSWORD = os.getenv("TUGRAPH_PASSWORD", "")
 
 
-def batched(items: Iterable[dict[str, Any]], size: int) -> Iterator[list[dict[str, Any]]]:
-    batch: list[dict[str, Any]] = []
-    for item in items:
-        batch.append(item)
-        if len(batch) >= size:
-            yield batch
-            batch = []
-    if batch:
-        yield batch
-
-
 def progress_iter(items: Iterable[Any], desc: str, unit: str = "it", total: int | None = None) -> Iterable[Any]:
     if tqdm is None:
         return items
@@ -102,13 +91,6 @@ def read_rows(path: Path, max_rows: int | None = None, progress_desc: str | None
         rows = progress_iter(input_rows, progress_desc, "rows", max_rows) if progress_desc else input_rows
         for row_number, row in enumerate(rows, start=1):
             yield row_number, row
-
-
-def read_dict_csv(path: Path, progress_desc: str | None = None) -> Iterator[dict[str, str]]:
-    with path.open(newline="", encoding="utf-8", errors="replace") as fh:
-        reader = csv.DictReader(fh)
-        rows = progress_iter(reader, progress_desc, "rows") if progress_desc else reader
-        yield from rows
 
 
 def write_dict_csv(
@@ -170,42 +152,3 @@ def run_schema(uri: str, user: str, password: str, graph: str, schemas: list[dic
                     safe_call(session, "CALL db.createEdgeLabelByJson($json_data)", json_data=payload)
     finally:
         driver.close()
-
-
-def upsert_vertices(session, label: str, rows: list[dict[str, Any]]) -> None:
-    if rows:
-        session.run("CALL db.upsertVertex($label, $rows)", label=label, rows=rows).consume()
-
-
-def upsert_edges(
-    session,
-    label: str,
-    src_label: str,
-    src_key: str,
-    dst_label: str,
-    dst_key: str,
-    rows: list[dict[str, Any]],
-    pair_unique: str | None = None,
-) -> None:
-    if not rows:
-        return
-    query = (
-        "CALL db.upsertEdge($label, "
-        "{type:$src_label, key:$src_key}, "
-        "{type:$dst_label, key:$dst_key}, "
-        "$rows"
-    )
-    if pair_unique:
-        query += ", $pair_unique"
-    query += ")"
-    params = {
-        "label": label,
-        "src_label": src_label,
-        "src_key": src_key,
-        "dst_label": dst_label,
-        "dst_key": dst_key,
-        "rows": rows,
-    }
-    if pair_unique:
-        params["pair_unique"] = pair_unique
-    session.run(query, **params).consume()

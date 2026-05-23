@@ -134,3 +134,93 @@ TCG 实际写出边数：
 - SQLite 去重库记录数与 CSV 实际边数一致。
 
 当前结论：`data/processed` 可作为本次提交目录。
+
+## 2026-05-23 TuGraph 导入策略
+
+HCG 和 TCG 数据导入统一使用 TuGraph 原生 `lgraph_import`。Bolt 不再承担 CSV
+数据写入，只保留 `scripts/create_tugraph_schema.py` 用于在线创建图和 schema。
+
+原生导入配置入口：
+
+```bash
+PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
+  --graph-type hcg \
+  --processed-dir docker/tugraph-import/hcg \
+  --local-import-root docker/tugraph-import \
+  --container-import-root /import \
+  --output docker/tugraph-import/hcg/import.json
+
+PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
+  --graph-type tcg \
+  --processed-dir docker/tugraph-import/tcg \
+  --local-import-root docker/tugraph-import \
+  --container-import-root /import \
+  --output docker/tugraph-import/tcg/import.json
+```
+
+在线只建图/schema：
+
+```bash
+PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type hcg
+PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type tcg
+```
+
+## 2026-05-23 TuGraph 导入目录挂载与配置生成
+
+为让运行中的 `tugraph-db` 容器访问原生导入目录，已重建同名容器并增加
+`docker/tugraph-import:/import` 挂载。未执行 `lgraph_import` 数据导入。
+
+当前 `tugraph-db` 挂载：
+
+```text
+docker/tugraph-data   -> /var/lib/lgraph/data
+docker/tugraph-logs   -> /var/log/lgraph_log
+docker/tugraph-import -> /import
+```
+
+为避免原生导入期间临时文件写入 Docker overlay，已创建宿主机临时目录：
+
+```text
+docker/tugraph-tmp -> /tmp
+```
+
+该目录位于 `/home` 分区，当前可用空间约 `77G`；运行 `lgraph_import` 的临时容器
+应显式增加 `-v "$PWD/docker/tugraph-tmp:/tmp"`。
+
+原容器已保留为停止状态备份：
+
+```text
+tugraph-db-before-import-mount-20260523140024
+```
+
+`docker/tugraph-import` 使用 `data/processed` 的硬链接视图，避免复制第二份
+全量 CSV 数据：
+
+```text
+docker/tugraph-import/hcg/endpoints.csv
+docker/tugraph-import/hcg/communicates.csv
+docker/tugraph-import/tcg/flows.csv
+docker/tugraph-import/tcg/causes_full_parts/relation_type=*/*.csv
+```
+
+已生成并在容器内确认可见的原生导入配置：
+
+```text
+docker/tugraph-import/hcg/import.json
+docker/tugraph-import/tcg/import.json
+```
+
+配置校验结果：
+
+| 图 | 配置文件 | 导入文件数 | schema label |
+| --- | --- | ---: | --- |
+| HCG | `docker/tugraph-import/hcg/import.json` | 2 | `Endpoint`, `COMMUNICATES` |
+| TCG | `docker/tugraph-import/tcg/import.json` | 136 | `Flow`, `CAUSES` |
+
+容器内确认：
+
+```text
+/import/hcg/import.json
+/import/tcg/import.json
+/import/tcg/causes_full_parts/*.csv 共 135 个分片
+```

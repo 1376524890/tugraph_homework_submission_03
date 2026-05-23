@@ -7,4 +7,6 @@ data/exports/
 data/raw/
 docker/tugraph-data/
 docker/tugraph-logs/
+docker/tugraph-import/
+docker/tugraph-tmp/
 archive/

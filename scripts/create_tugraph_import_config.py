@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate lgraph_import config files for TuGraph bulk import."""
+"""Generate lgraph_import config files for TuGraph native bulk import."""
 
 from __future__ import annotations
 
@@ -13,8 +13,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from create_hcg_db import SCHEMAS as HCG_SCHEMAS  # noqa: E402
-from create_tcg_db import SCHEMAS as TCG_SCHEMAS  # noqa: E402
+from create_tugraph_schema import HCG_SCHEMAS, TCG_SCHEMAS  # noqa: E402
 from tugraph_homework.common import ROOT  # noqa: E402
 from tugraph_homework.transform import HCG_EDGE_FIELDS, HCG_ENDPOINT_FIELDS, TCG_EDGE_FIELDS, TCG_FLOW_FIELDS  # noqa: E402
 

@@ -20,15 +20,15 @@ data/raw/Dataset-Unicauca-Version2-87Atts.csv
 | `data/processed/tcg/` | TCG 中间文件：`flows.csv`、`causes_full_parts/`。 |
 | `data/processed/reports/` | TCG 边数量估算报告。 |
 | `data/exports/` | 导出结果。 |
-| `scripts/` | 数据检查、构图、查询视图和 TuGraph 导入脚本。 |
-| `src/tugraph_homework/` | 共享转换和导入工具代码。 |
+| `scripts/` | 数据检查、构图、查询视图、schema 初始化和原生导入配置脚本。 |
+| `src/tugraph_homework/` | 共享转换和通用工具代码。 |
 | `docs/` | 数据结构、目录规划、图建模说明和唯一实验记录。 |
 
 实验过程统一维护在 [docs/experiment_record.md](docs/experiment_record.md)。后续数据下载、处理、校验、导入和查询实验只追加或更新这一个实验记录文档，避免多份记录相互不一致。
 
 ## 环境
 
-脚本通过 `PYTHONPATH=src` 运行。生成 Parquet 或读取 Parquet 查询视图时需要 `pandas` 和 `pyarrow`；导入 TuGraph 时需要 `neo4j` Python 驱动。
+脚本通过 `PYTHONPATH=src` 运行。生成 Parquet 或读取 Parquet 查询视图时需要 `pandas` 和 `pyarrow`；通过 Bolt 创建图和 schema 时需要 `neo4j` Python 驱动。数据导入统一使用 TuGraph 原生 `lgraph_import`。
 
 TuGraph 连接信息可写入本地 `.env`：
 
@@ -55,8 +55,8 @@ PYTHONPATH=src python3 scripts/inspect_dataset.py --sample-rows 200000
 | TCG 估算 | 3,577,296 条 flow 计数统计 | 仅报告文件 | 约 2 到 4 分钟 | 低 |
 | TCG 全关系构建 | 约 143,221,978 条候选边 | Parquet 约 8.40 GiB，CSV 约 24.01 GiB | 预计较长 | 中高 |
 | TCG 查询视图 | 取决于输入边文件和过滤条件 | 通常小于输入边文件 | 分钟级到小时级 | 取决于输入规模 |
-| TuGraph 导入 HCG | 约 265 万条点边记录 | TuGraph 存储会大于 CSV | 分钟级到十几分钟 | 中 |
-| TuGraph 导入 TCG | 约 357 万 Flow 点和按窗口生成的 CAUSES 边 | TuGraph 存储会大于中间文件 | 取决于边数量 | 中高 |
+| TuGraph 原生导入 HCG | 约 265 万条点边记录 | TuGraph 存储会大于 CSV | 分钟级 | 中 |
+| TuGraph 原生导入 TCG | 约 357 万 Flow 点和按窗口生成的 CAUSES 边 | TuGraph 存储会大于中间文件 | 取决于边数量 | 中高 |
 
 TCG 构建按关系使用时间窗口：`CR=5,PR=1,DHR=1,SHR=5`。`delta_seconds` 会作为边属性保存。脚本设置了候选边安全阈值：估算的待构建边数超过 `--max-candidate-edges` 时会拒绝执行 build。当前全关系构建需要把阈值设置到 150,000,000 以上。
 
@@ -237,14 +237,16 @@ data/processed/tcg/query_views/causes_delta_5s.parquet.report.md
 
 ## TuGraph 导入
 
-TCG 边数量较大，推荐使用 TuGraph 原生 `lgraph_import` 导入 CSV。Bolt 写入适合 HCG、小样本 TCG 或导入链路验证，不适合全量 TCG。
+HCG 和 TCG 数据统一使用 TuGraph 原生 `lgraph_import` 导入 CSV。Bolt 只保留
+`scripts/create_tugraph_schema.py` 这个建图/schema 入口，不再通过 Bolt 写入 CSV
+数据。
 
-生成 TCG CSV：
+生成 HCG 和 TCG CSV：
 
 ```bash
 PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
   --csv data/raw/Dataset-Unicauca-Version2-87Atts.csv \
-  --graph tcg \
+  --graph all \
   --output-root docker/tugraph-import \
   --relation-types CR,PR,DHR,SHR \
   --chunk-size 1000000 \
@@ -255,6 +257,13 @@ PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
 
 ```bash
 PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
+  --graph-type hcg \
+  --processed-dir docker/tugraph-import/hcg \
+  --local-import-root docker/tugraph-import \
+  --container-import-root /import \
+  --output docker/tugraph-import/hcg/import.json
+
+PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
   --graph-type tcg \
   --processed-dir docker/tugraph-import/tcg \
   --local-import-root docker/tugraph-import \
@@ -262,7 +271,7 @@ PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
   --output docker/tugraph-import/tcg/import.json
 ```
 
-运行原生导入时，容器需要能访问 `/import`。当前运行中的 `tugraph-db` 容器没有挂载 `docker/tugraph-import`，因此需要使用带 `/import` 挂载的容器运行 `lgraph_import`，或重新启动 TuGraph 容器时加入该挂载。离线导入会写入数据库目录，运行前先停止正在使用同一数据目录的 TuGraph 服务。
+运行原生导入时，容器需要能访问 `/import`。离线导入会写入数据库目录，运行前先停止正在使用同一数据目录的 TuGraph 服务。导入容器同时把 `docker/tugraph-tmp` 挂载到 `/tmp`，避免临时文件写入 Docker overlay 导致根分区爆满。
 
 ```bash
 set -a
@@ -274,6 +283,19 @@ docker stop tugraph-db
 docker run --rm \
   -v "$PWD/docker/tugraph-data:/var/lib/lgraph/data" \
   -v "$PWD/docker/tugraph-import:/import" \
+  -v "$PWD/docker/tugraph-tmp:/tmp" \
+  custom-tugraph-runtime:latest \
+  lgraph_import \
+  --dir /var/lib/lgraph/data \
+  --config_file /import/hcg/import.json \
+  --graph hcg \
+  --user "$TUGRAPH_USER" \
+  --password "$TUGRAPH_PASSWORD"
+
+docker run --rm \
+  -v "$PWD/docker/tugraph-data:/var/lib/lgraph/data" \
+  -v "$PWD/docker/tugraph-import:/import" \
+  -v "$PWD/docker/tugraph-tmp:/tmp" \
   custom-tugraph-runtime:latest \
   lgraph_import \
   --dir /var/lib/lgraph/data \
@@ -285,23 +307,14 @@ docker run --rm \
 docker start tugraph-db
 ```
 
-Bolt 导入 HCG：
+如果只需要在线创建图和 schema，不导入数据，可以用 Bolt schema 脚本：
 
 ```bash
-PYTHONPATH=src python3 scripts/create_hcg_db.py \
-  --processed-dir data/processed/hcg \
-  --progress-interval 500000
+PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type hcg
+PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type tcg
 ```
 
-Bolt 导入 TCG 小样本：
-
-```bash
-PYTHONPATH=src python3 scripts/create_tcg_db.py \
-  --processed-dir data/processed/tcg \
-  --progress-interval 500000
-```
-
-Bolt 脚本依赖 `neo4j` Python 驱动；Parquet 生成或读取依赖 `pandas` 和 `pyarrow`。当前全量 TCG CSV 预估约 24.01 GiB，TuGraph 导入后存储会进一步放大，运行前应确认磁盘空间和目标图容量。
+当前全量 TCG CSV 预估约 24.01 GiB，TuGraph 导入后存储会进一步放大，运行前应确认磁盘空间和目标图容量。
 
 ## 校验重点
 

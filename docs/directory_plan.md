@@ -10,8 +10,8 @@
 | `data/processed/reports/` | TCG 边数量估算报告。 |
 | `data/exports/` | 从 TuGraph 或脚本导出的结果文件。 |
 | `docker/tugraph-import/` | 可选的 TuGraph 原生导入 CSV 目录；CSV 生成脚本可把输出写到这里。 |
-| `scripts/` | 可直接运行的入口脚本。 |
-| `src/tugraph_homework/` | 共享 Python 工具代码。 |
+| `scripts/` | 数据检查、构图、查询视图、schema 初始化和原生导入配置入口脚本。 |
+| `src/tugraph_homework/` | 共享转换和通用 Python 工具代码。 |
 | `docs/` | 数据结构、建模方案、运行说明和唯一实验记录。 |
 
 推荐所有重新生成的中间文件写入 `data/processed/`，该目录作为提交目录。实验过程只维护 [experiment_record.md](experiment_record.md) 这一份记录，后续数据下载、处理、校验、导入和查询实验都应持续更新该文档。
@@ -46,3 +46,6 @@ data/processed/reports/tcg_edge_estimation_report.md
 
 如需给 TuGraph 原生导入准备 CSV，可把 `--output-root` 改成
 `docker/tugraph-import`，输出结构会保持一致。
+
+TuGraph 数据导入统一使用原生 `lgraph_import`。Bolt 入口只保留
+`scripts/create_tugraph_schema.py`，用于在线创建图和 schema，不写入 CSV 数据。

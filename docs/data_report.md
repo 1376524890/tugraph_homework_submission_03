@@ -184,7 +184,21 @@ data/processed/tcg/query_views/causes_delta_5s.parquet.report.md
 
 ## TuGraph 导入
 
-TCG 全量导入推荐使用 TuGraph 原生 `lgraph_import` 读取 CSV。生成导入配置：
+HCG 和 TCG 数据统一使用 TuGraph 原生 `lgraph_import` 读取 CSV。Bolt 只保留
+`scripts/create_tugraph_schema.py`，用于在线创建图和 schema，不写入数据。
+
+生成 HCG 导入配置：
+
+```bash
+PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
+  --graph-type hcg \
+  --processed-dir docker/tugraph-import/hcg \
+  --local-import-root docker/tugraph-import \
+  --container-import-root /import \
+  --output docker/tugraph-import/hcg/import.json
+```
+
+生成 TCG 导入配置：
 
 ```bash
 PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
@@ -195,4 +209,9 @@ PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
   --output docker/tugraph-import/tcg/import.json
 ```
 
-Bolt 导入脚本 `scripts/create_tcg_db.py` 适合小样本或链路验证。
+只建图/schema、不导入数据：
+
+```bash
+PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type hcg
+PYTHONPATH=src python3 scripts/create_tugraph_schema.py --graph-type tcg
+```
