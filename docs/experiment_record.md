@@ -187,7 +187,7 @@ docker/tugraph-tmp -> /tmp
 该目录位于 `/home` 分区，当前可用空间约 `77G`；运行 `lgraph_import` 的临时容器
 应显式增加 `-v "$PWD/docker/tugraph-tmp:/tmp"`。
 
-原容器已保留为停止状态备份：
+临时停止状态备份容器已按后续清理要求删除：
 
 ```text
 tugraph-db-before-import-mount-20260523140024
@@ -224,3 +224,118 @@ docker/tugraph-import/tcg/import.json
 /import/tcg/import.json
 /import/tcg/causes_full_parts/*.csv 共 135 个分片
 ```
+
+## 2026-05-23 原生导入前状态快照
+
+记录时间：
+
+```text
+2026-05-23 14:11:09 CST +0800
+```
+
+导入前未执行 `lgraph_import`。当前目标容器状态：
+
+| 容器 | 镜像 | 状态 | 端口 |
+| --- | --- | --- | --- |
+| `tugraph-db` | `custom-tugraph-runtime:latest` | Up 10 minutes | `7070`, `7687`, `9090` 映射到宿主机 |
+| `tugraph-db-old-20260522122320` | `custom-tugraph-runtime:latest` | Up 17 hours | 无宿主机端口映射 |
+
+目标容器详情：
+
+```text
+container_id=b6b8c0de2b28fbc1085f36b60d4d6e432125ba4a7ac1e1e9a98e5b1e99f7d80e
+image=custom-tugraph-runtime:latest
+image_id=b9ccb146827f
+cmd=["lgraph_server","--enable_plugin","true"]
+restart=always
+```
+
+目标容器挂载：
+
+```text
+/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-data:/var/lib/lgraph/data
+/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-logs:/var/log/lgraph_log
+/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-import:/import
+```
+
+长期运行的旧容器 `tugraph-db-old-20260522122320` 使用另一组宿主机目录：
+
+```text
+/home/marktom/tugraph/tugraph_data:/var/lib/lgraph/data
+/home/marktom/tugraph/tugraph_logs:/var/log/lgraph_log
+```
+
+磁盘空间快照：
+
+| 路径 | 文件系统 | 总量 | 已用 | 可用 | 使用率 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `/home` | `/dev/sdb1` | 196G | 109G | 77G | 59% |
+| `/` | `/dev/sda3` | 31G | 27G | 2.8G | 91% |
+| `/var/lib/lgraph/data` 容器内 | `/dev/sdb1` | 196G | 109G | 77G | 59% |
+| `/import` 容器内 | `/dev/sdb1` | 196G | 109G | 77G | 59% |
+| `/tmp` 长期运行容器内 | Docker overlay | 31G | 27G | 2.8G | 91% |
+
+注意：长期运行的 `tugraph-db` 容器没有挂载 `/tmp`。执行原生导入时应使用
+README 中的临时 `docker run --rm` 导入容器，并显式挂载：
+
+```bash
+-v "$PWD/docker/tugraph-tmp:/tmp"
+```
+
+宿主机目录规模：
+
+| 路径 | 规模 |
+| --- | ---: |
+| `docker/tugraph-data` | 11M |
+| `docker/tugraph-logs` | 108K |
+| `docker/tugraph-import` | 34G |
+| `docker/tugraph-tmp` | 4.0K |
+
+导入文件状态：
+
+| 图 | 配置 | 配置文件数 | schema label |
+| --- | --- | ---: | --- |
+| HCG | `docker/tugraph-import/hcg/import.json` | 2 | `Endpoint`, `COMMUNICATES` |
+| TCG | `docker/tugraph-import/tcg/import.json` | 136 | `Flow`, `CAUSES` |
+
+导入 CSV 行数：
+
+| 文件 | 行数，含表头 |
+| --- | ---: |
+| `docker/tugraph-import/hcg/endpoints.csv` | 935,601 |
+| `docker/tugraph-import/hcg/communicates.csv` | 1,716,085 |
+| `docker/tugraph-import/tcg/flows.csv` | 3,577,297 |
+| `docker/tugraph-import/tcg/causes_full_parts/**/*.csv` | 135 个分片 |
+
+导入文件表观大小：
+
+```text
+docker/tugraph-import total: 33.27 GiB
+docker/tugraph-import/tcg: 32.81 GiB
+```
+
+当前 git 工作区在记录快照时无未提交变更。
+
+导入前建议的回滚信息：
+
+1. 如果 `lgraph_import` 失败且数据库目录不可用，先停止服务：
+
+```bash
+docker stop tugraph-db
+```
+
+2. 保留失败现场用于排查：
+
+```bash
+mv docker/tugraph-data docker/tugraph-data-failed-$(date +%Y%m%d%H%M%S)
+mkdir -p docker/tugraph-data
+```
+
+3. 重新启动空数据目录的服务容器：
+
+```bash
+docker start tugraph-db
+```
+
+4. 如需恢复到本次导入前的空目标状态，可使用当前记录：导入前
+`docker/tugraph-data` 仅约 `11M`，主要包含 TuGraph 元数据和插件文件。
