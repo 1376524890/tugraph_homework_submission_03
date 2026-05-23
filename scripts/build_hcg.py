@@ -2,7 +2,7 @@
 """构建 HCG 中间文件。
 
 本脚本从原始或标准化 flow 数据读取记录，生成 Endpoint 顶点 CSV 和
-COMMUNICATES 聚合边 CSV。输出默认写入 data/rebuild/hcg，不会连接 TuGraph。
+COMMUNICATES 聚合边 CSV。输出默认写入 data/processed/hcg，不会连接 TuGraph。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def replace_tmp(tmp_path: Path, final_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build the flow-level Host Communication Graph (HCG) CSV files.")
     parser.add_argument("--input", type=Path, default=DEFAULT_DATASET)
-    parser.add_argument("--output", type=Path, default=Path("data/rebuild/hcg"))
+    parser.add_argument("--output", type=Path, default=Path("data/processed/hcg"))
     parser.add_argument("--max-rows", type=int, default=None)
     args = parser.parse_args()
 

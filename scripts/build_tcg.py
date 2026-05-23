@@ -12,6 +12,7 @@ import bisect
 import csv
 import itertools
 import os
+import sqlite3
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -463,6 +464,56 @@ class PartitionWriter:
             self.flush(relation_type)
 
 
+class PairDeduper:
+    def add(self, src_record_id: str, dst_record_id: str) -> bool:
+        raise NotImplementedError
+
+    def close(self) -> None:
+        return
+
+
+class MemoryPairDeduper(PairDeduper):
+    def __init__(self) -> None:
+        self.seen_pairs: set[tuple[str, str]] = set()
+
+    def add(self, src_record_id: str, dst_record_id: str) -> bool:
+        pair_key = (src_record_id, dst_record_id)
+        if pair_key in self.seen_pairs:
+            return False
+        self.seen_pairs.add(pair_key)
+        return True
+
+
+class SQLitePairDeduper(PairDeduper):
+    def __init__(self, path: Path, commit_interval: int = 100_000) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            path.unlink()
+        self.path = path
+        self.commit_interval = commit_interval
+        self.pending = 0
+        self.conn = sqlite3.connect(path)
+        self.conn.execute("PRAGMA journal_mode=OFF")
+        self.conn.execute("PRAGMA synchronous=OFF")
+        self.conn.execute("PRAGMA temp_store=MEMORY")
+        self.conn.execute("PRAGMA locking_mode=EXCLUSIVE")
+        self.conn.execute("CREATE TABLE seen_pairs (src_record_id TEXT NOT NULL, dst_record_id TEXT NOT NULL, PRIMARY KEY (src_record_id, dst_record_id)) WITHOUT ROWID")
+        self.conn.execute("BEGIN")
+
+    def add(self, src_record_id: str, dst_record_id: str) -> bool:
+        cursor = self.conn.execute("INSERT OR IGNORE INTO seen_pairs VALUES (?, ?)", (src_record_id, dst_record_id))
+        self.pending += 1
+        if self.pending >= self.commit_interval:
+            self.conn.commit()
+            self.conn.execute("BEGIN")
+            self.pending = 0
+        return cursor.rowcount == 1
+
+    def close(self) -> None:
+        self.conn.commit()
+        self.conn.close()
+
+
 def build_edges(
     flows: list[dict[str, Any]],
     output_dir: Path,
@@ -471,10 +522,17 @@ def build_edges(
     chunk_size: int,
     max_delta_seconds: int | None,
     relation_window_overrides: dict[str, int | None] | None = None,
+    dedupe_store: str = "sqlite",
+    dedupe_sqlite_path: Path | None = None,
 ) -> Counter[str]:
     writer = PartitionWriter(output_dir, output_format, chunk_size)
     # relation_types 已按优先级排序；同一有向 flow pair 先命中的就是最高优先级关系。
-    seen_pairs: set[tuple[str, str]] = set()
+    if dedupe_store == "memory":
+        deduper: PairDeduper = MemoryPairDeduper()
+    else:
+        dedupe_path = dedupe_sqlite_path or output_dir / ".tcg_seen_pairs.sqlite"
+        print(f"dedupe_store=sqlite file={dedupe_path}", flush=True)
+        deduper = SQLitePairDeduper(dedupe_path)
     windows = relation_windows(max_delta_seconds, relation_window_overrides)
     try:
         for relation_type in relation_types:
@@ -484,14 +542,13 @@ def build_edges(
                 "edges",
             ):
                 edge = tcg_edge(left, right, relation_type, matched_rule, shared_ip, shared_endpoint)
-                pair_key = (edge["src_record_id"], edge["dst_record_id"])
-                if pair_key in seen_pairs:
+                if not deduper.add(edge["src_record_id"], edge["dst_record_id"]):
                     continue
-                seen_pairs.add(pair_key)
                 writer.write(edge)
             writer.flush(relation_type)
             print(f"relation_type={relation_type} edges_written={writer.counts[relation_type]}", flush=True)
     finally:
+        deduper.close()
         writer.close()
     return writer.counts
 
@@ -500,7 +557,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build or estimate the CR/PR/DHR/SHR Traffic Causality Graph (TCG).")
     parser.add_argument("--input", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--mode", choices=["estimate", "build"], required=True)
-    parser.add_argument("--output", type=Path, default=Path("data/rebuild/tcg"))
+    parser.add_argument("--output", type=Path, default=Path("data/processed/tcg"))
     parser.add_argument("--relation-types", type=parse_relation_types, default=parse_relation_types("CR,PR,DHR,SHR"))
     parser.add_argument("--output-format", choices=["parquet", "csv"], default="parquet")
     parser.add_argument("--partition-by", choices=["relation_type"], default="relation_type")
@@ -515,6 +572,8 @@ def main() -> None:
     )
     parser.add_argument("--max-candidate-edges", type=int, default=DEFAULT_MAX_CANDIDATE_EDGES, help="Abort build when estimated selected candidate edges exceed this limit.")
     parser.add_argument("--force-large-build", action="store_true", help="Bypass the candidate-edge safety guard.")
+    parser.add_argument("--dedupe-store", choices=["sqlite", "memory"], default="sqlite", help="Store TCG pair de-duplication state on disk or in memory. SQLite is slower but uses much less RAM.")
+    parser.add_argument("--dedupe-sqlite-path", type=Path, default=None, help="SQLite file for --dedupe-store sqlite. Default: OUTPUT/.tcg_seen_pairs.sqlite")
     args = parser.parse_args()
     max_delta_seconds = normalize_window(args.max_delta_seconds)
 
@@ -538,7 +597,17 @@ def main() -> None:
 
     flows = load_flows(args.input, args.max_rows)
     flow_path = write_flows(flows, args.output, args.output_format)
-    counts = build_edges(flows, args.output, args.relation_types, args.output_format, args.chunk_size, max_delta_seconds, args.relation_max_delta_seconds)
+    counts = build_edges(
+        flows,
+        args.output,
+        args.relation_types,
+        args.output_format,
+        args.chunk_size,
+        max_delta_seconds,
+        args.relation_max_delta_seconds,
+        args.dedupe_store,
+        args.dedupe_sqlite_path,
+    )
     print(f"flows_file={flow_path}")
     print(f"causes_parts_dir={args.output / 'causes_full_parts'}")
     for relation_type in args.relation_types:

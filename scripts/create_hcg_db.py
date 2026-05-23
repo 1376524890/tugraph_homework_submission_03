@@ -131,7 +131,7 @@ def processed_paths(processed_dir: Path) -> tuple[Path, Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create and populate the Host Communication Graph (HCG) in TuGraph from processed CSV files.")
-    parser.add_argument("--processed-dir", type=Path, default=ROOT / "data" / "rebuild" / "hcg")
+    parser.add_argument("--processed-dir", type=Path, default=ROOT / "data" / "processed" / "hcg")
     parser.add_argument("--uri", default=DEFAULT_URI)
     parser.add_argument("--user", default=DEFAULT_USER)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
@@ -145,7 +145,7 @@ def main() -> None:
     run_schema(args.uri, args.user, args.password, args.graph, SCHEMAS)
     endpoint_path, edge_path = processed_paths(args.processed_dir)
     if not endpoint_path.exists() or not edge_path.exists():
-        parser.error(f"HCG CSV files not found in {args.processed_dir}. Run scripts/prepare_processed_csv.py --graph hcg --output-root data/rebuild first.")
+        parser.error(f"HCG CSV files not found in {args.processed_dir}. Run scripts/prepare_processed_csv.py --graph hcg --output-root data/processed first.")
     endpoint_rows = (hcg_endpoint_from_csv(row) for row in read_dict_csv(endpoint_path))
     edge_rows = (hcg_edge_from_csv(row) for row in read_dict_csv(edge_path))
 

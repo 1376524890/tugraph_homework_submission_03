@@ -68,6 +68,8 @@ def prepare_tcg(
     force_large_build: bool,
     max_delta_seconds: int | None,
     relation_window_overrides: dict[str, int | None] | None,
+    dedupe_store: str,
+    dedupe_sqlite_path: Path | None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     estimate = estimate_edges_from_path(csv_path, max_rows, max_delta_seconds, relation_window_overrides)
@@ -88,7 +90,17 @@ def prepare_tcg(
     flow_path = write_flows(flows, output_dir, "csv")
     print(f"tcg_flows={len(flows)} file={flow_path} size_bytes={file_size(flow_path)}")
 
-    counts = build_edges(flows, output_dir, relation_types, "csv", chunk_size, max_delta_seconds, relation_window_overrides)
+    counts = build_edges(
+        flows,
+        output_dir,
+        relation_types,
+        "csv",
+        chunk_size,
+        max_delta_seconds,
+        relation_window_overrides,
+        dedupe_store,
+        dedupe_sqlite_path,
+    )
     for relation_type in relation_types:
         print(f"tcg_{relation_type}_edges={counts[relation_type]}")
     print(f"tcg_causes_parts_dir={output_dir / 'causes_full_parts'}")
@@ -98,7 +110,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate latest HCG and TCG intermediate CSV files.")
     parser.add_argument("--csv", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--graph", choices=["hcg", "tcg", "all"], default="all")
-    parser.add_argument("--output-root", type=Path, default=ROOT / "data" / "rebuild")
+    parser.add_argument("--output-root", type=Path, default=ROOT / "data" / "processed")
     parser.add_argument("--relation-types", type=parse_relation_types, default=parse_relation_types("CR,PR,DHR,SHR"))
     parser.add_argument("--chunk-size", type=int, default=1_000_000)
     parser.add_argument("--max-rows", type=int, default=None)
@@ -112,6 +124,8 @@ def main() -> None:
     parser.add_argument("--skip-estimate", action="store_true", help="Skip TCG estimate report before writing CSV parts.")
     parser.add_argument("--max-candidate-edges", type=int, default=DEFAULT_MAX_CANDIDATE_EDGES, help="Abort TCG build when estimated selected candidate edges exceed this limit.")
     parser.add_argument("--force-large-build", action="store_true", help="Bypass the TCG candidate-edge safety guard.")
+    parser.add_argument("--dedupe-store", choices=["sqlite", "memory"], default="sqlite", help="Store TCG pair de-duplication state on disk or in memory. SQLite is slower but uses much less RAM.")
+    parser.add_argument("--dedupe-sqlite-path", type=Path, default=None, help="SQLite file for --dedupe-store sqlite. Default: TCG_OUTPUT/.tcg_seen_pairs.sqlite")
     args = parser.parse_args()
     max_delta_seconds = normalize_window(args.max_delta_seconds)
 
@@ -132,6 +146,8 @@ def main() -> None:
             args.force_large_build,
             max_delta_seconds,
             args.relation_max_delta_seconds,
+            args.dedupe_store,
+            args.dedupe_sqlite_path,
         )
 
 

@@ -109,7 +109,7 @@ PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
 PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
   --csv data/raw/Dataset-Unicauca-Version2-87Atts.csv \
   --graph all \
-  --output-root data/rebuild \
+  --output-root data/processed \
   --relation-types CR,PR,DHR,SHR \
   --chunk-size 1000000 \
   --max-candidate-edges 150000000
@@ -118,22 +118,22 @@ PYTHONPATH=src python3 scripts/prepare_processed_csv.py \
 HCG 输出：
 
 ```text
-data/rebuild/hcg/endpoints.csv
-data/rebuild/hcg/communicates.csv
+data/processed/hcg/endpoints.csv
+data/processed/hcg/communicates.csv
 ```
 
 TCG 输出：
 
 ```text
-data/rebuild/tcg/flows.csv
-data/rebuild/tcg/causes_full_parts/relation_type=CR/*.csv
-data/rebuild/tcg/causes_full_parts/relation_type=PR/*.csv
-data/rebuild/tcg/causes_full_parts/relation_type=DHR/*.csv
-data/rebuild/tcg/causes_full_parts/relation_type=SHR/*.csv
+data/processed/tcg/flows.csv
+data/processed/tcg/causes_full_parts/relation_type=CR/*.csv
+data/processed/tcg/causes_full_parts/relation_type=PR/*.csv
+data/processed/tcg/causes_full_parts/relation_type=DHR/*.csv
+data/processed/tcg/causes_full_parts/relation_type=SHR/*.csv
 ```
 
 TCG CSV 生成前会先估算候选边数量并写出
-`data/rebuild/reports/tcg_edge_estimation_report.md`。如果估算数量超过
+`data/processed/reports/tcg_edge_estimation_report.md`。如果估算数量超过
 `--max-candidate-edges`，脚本会拒绝继续构建；确认磁盘和时间预算后再提高阈值
 或显式使用 `--force-large-build`。
 
@@ -143,7 +143,7 @@ TCG 建议先估算：
 PYTHONPATH=src python3 scripts/build_tcg.py \
   --input data/raw/Dataset-Unicauca-Version2-87Atts.csv \
   --mode estimate \
-  --output data/rebuild/tcg
+  --output data/processed/tcg
 ```
 
 ## 查询视图
@@ -152,8 +152,8 @@ PYTHONPATH=src python3 scripts/build_tcg.py \
 
 ```bash
 PYTHONPATH=src python3 scripts/query_tcg_by_delta.py \
-  --input data/rebuild/tcg/causes_full_parts \
-  --output data/rebuild/tcg/query_views/causes_delta_5s.parquet \
+  --input data/processed/tcg/causes_full_parts \
+  --output data/processed/tcg/query_views/causes_delta_5s.parquet \
   --max-delta-seconds 5 \
   --relation-types CR,PR,DHR,SHR
 ```

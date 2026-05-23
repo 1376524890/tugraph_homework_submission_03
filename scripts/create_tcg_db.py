@@ -152,7 +152,7 @@ def import_processed(args: argparse.Namespace) -> None:
     if not flow_path.exists() or not edge_paths:
         raise FileNotFoundError(
             f"TCG CSV files not found in {args.processed_dir}. "
-            "Run scripts/prepare_processed_csv.py --graph tcg --output-root data/rebuild first."
+            "Run scripts/prepare_processed_csv.py --graph tcg --output-root data/processed first."
         )
 
     run_schema(args.uri, args.user, args.password, args.graph, SCHEMAS)
@@ -199,7 +199,7 @@ def import_processed(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create and populate the Traffic Causality Graph (TCG) in TuGraph from processed CSV files.")
-    parser.add_argument("--processed-dir", type=Path, default=ROOT / "data" / "rebuild" / "tcg")
+    parser.add_argument("--processed-dir", type=Path, default=ROOT / "data" / "processed" / "tcg")
     parser.add_argument("--uri", default=DEFAULT_URI)
     parser.add_argument("--user", default=DEFAULT_USER)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
