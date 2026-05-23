@@ -107,16 +107,6 @@ TCG_SCHEMAS: list[dict[str, Any]] = [
             {"name": "relation_priority", "type": "INT64", "optional": False},
             {"name": "delta_seconds", "type": "INT64", "optional": False, "index": True},
             {"name": "same_timestamp", "type": "BOOL", "optional": False},
-            {"name": "matched_rule", "type": "STRING", "optional": False},
-            {"name": "src_flow_timestamp_epoch", "type": "INT64", "optional": False},
-            {"name": "dst_flow_timestamp_epoch", "type": "INT64", "optional": False},
-            {"name": "shared_ip", "type": "STRING", "optional": True, "index": True},
-            {"name": "shared_endpoint", "type": "STRING", "optional": False, "index": True},
-            {"name": "src_ip_pair", "type": "STRING", "optional": False},
-            {"name": "src_port_pair", "type": "STRING", "optional": False},
-            {"name": "dst_ip_pair", "type": "STRING", "optional": False},
-            {"name": "dst_port_pair", "type": "STRING", "optional": False},
-            {"name": "protocol_pair", "type": "STRING", "optional": False},
         ],
     },
 ]
@@ -142,6 +132,10 @@ def container_path(local_path: Path, local_root: Path, container_root: str) -> s
 
 def csv_parts(parts_dir: Path) -> list[Path]:
     return sorted(parts_dir.glob("relation_type=*/*.csv"))
+
+
+def csv_part_dirs(parts_dir: Path) -> list[Path]:
+    return sorted(path for path in parts_dir.glob("relation_type=*") if path.is_dir() and any(path.glob("*.csv")))
 
 
 def hcg_config(processed_dir: Path, local_root: Path, container_root: str, keep_indexes: bool) -> dict[str, Any]:
@@ -175,7 +169,9 @@ def hcg_config(processed_dir: Path, local_root: Path, container_root: str, keep_
 
 def tcg_config(processed_dir: Path, local_root: Path, container_root: str, keep_indexes: bool) -> dict[str, Any]:
     flow_path = processed_dir / "flows.csv"
-    edge_paths = [processed_dir / "causes.csv"] if (processed_dir / "causes.csv").exists() else csv_parts(processed_dir / "causes_full_parts")
+    edge_paths = [processed_dir / "causes.csv"] if (processed_dir / "causes.csv").exists() else csv_part_dirs(processed_dir / "causes_full_parts")
+    if not edge_paths:
+        edge_paths = csv_parts(processed_dir / "causes_full_parts")
     if not flow_path.exists() or not edge_paths:
         raise SystemExit(f"TCG CSV files not found in {processed_dir}")
     schemas = copy.deepcopy(TCG_SCHEMAS) if keep_indexes else strip_indexes(TCG_SCHEMAS)

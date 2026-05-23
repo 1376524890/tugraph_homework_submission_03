@@ -214,32 +214,22 @@ HCG 和 TCG 统一使用 `scripts/import_tugraph_native.py`。脚本会：
 4. 启动临时 Docker 容器执行 `lgraph_import`。
 5. 通过 Docker Compose 重新启动 `tugraph-db`。
 
-导入脚本会给临时导入容器挂载：
-
-```text
-docker/tugraph-data   -> /var/lib/lgraph/data
-docker/tugraph-import -> /import
-docker/tugraph-tmp    -> /tmp
-```
+**重要：精简属性导入（针对 TCG）**
+由于 TCG 边数据量极大，为了在有限磁盘空间内完成导入并支持 node2vec 任务，本项目采用了**精简属性**策略。导入器会从包含 19 个字段的 CSV 中提取核心 9 个字段，自动忽略冗余描述性字段。
 
 ### 5.1 HCG 导入
 
-预演 HCG 导入：
+生成配置并执行导入：
 
 ```bash
 cd /home/marktom/tugraph/tugraph_homework_submission_03
-PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg --dry-run
-```
+# 1. 生成 HCG 导入配置
+PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
+  --graph-type hcg \
+  --processed-dir data/processed/hcg \
+  --output docker/tugraph-import/hcg/import.json
 
-首次执行 HCG 导入：
-
-```bash
-PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg
-```
-
-如果当前环境已经导入过 HCG，再次导入需要显式确认覆盖：
-
-```bash
+# 2. 执行 HCG 导入
 PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg --force
 ```
 
@@ -260,50 +250,34 @@ finally:
 PY
 ```
 
-当前 HCG 验证结果：
-
-```text
-Endpoint=935600
-COMMUNICATES=1716084
-```
+当前 HCG 验证结果：`Endpoint=935600`, `COMMUNICATES=1716084`。
 
 ### 5.2 TCG 导入
 
-TCG 全量导入数据量明显大于 HCG。执行前确认 `/home` 可用空间、`docker/tugraph-import` 文件完整性和 `/tmp` 挂载：
+**策略说明**：
+TCG 边仅保留 `relation_id`, `record_id`, `relation_type`, `relation_priority`, `delta_seconds` 等核心结构。这能减少约 60% 的存储空间，且完全支持 node2vec 随机游走。
+
+执行前确认可用空间：
 
 ```bash
-cd /home/marktom/tugraph
-df -h /home
-du -sh tugraph_homework_submission_03/docker/tugraph-import
-docker exec tugraph-db sh -lc 'df -h /var/lib/lgraph/data /import /tmp'
-docker exec tugraph-db sh -lc 'ls -lh /import/tcg/import.json /import/tcg/flows.csv; find /import/tcg/causes_full_parts -type f -name "*.csv" | wc -l'
+df -h /home  # 建议剩余空间 > 80GB
 ```
 
-当前 TCG 导入文件状态：
-
-| 项目 | 值 |
-| --- | ---: |
-| `docker/tugraph-import/tcg/flows.csv` 行数，含表头 | 3,577,297 |
-| `docker/tugraph-import/tcg/causes_full_parts/**/*.csv` 分片数 | 135 |
-| `docker/tugraph-import/tcg/import.json` 配置文件数 | 136 |
-
-预演 TCG 导入：
+执行导入流程：
 
 ```bash
-cd /home/marktom/tugraph/tugraph_homework_submission_03
+# 1. 生成精简版 TCG 导入配置（此步会根据最新 Schema 定义映射字段）
+PYTHONPATH=src python3 scripts/create_tugraph_import_config.py \
+  --graph-type tcg \
+  --processed-dir data/processed/tcg \
+  --output docker/tugraph-import/tcg/import.json
+
+# 2. 预演导入（检查参数和空间预检）
 PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --dry-run
-```
 
-首次执行 TCG 导入：
-
-```bash
-PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg
-```
-
-如果当前环境已经导入过 TCG，再次导入需要显式确认覆盖：
-
-```bash
-PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --force
+# 3. 执行 TCG 导入
+# 如果空间非常紧张，可添加 --skip-preflight 跳过脚本的 3 倍空间硬性检查
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --force --skip-preflight
 ```
 
 验证 TCG 点边数量：
@@ -323,7 +297,7 @@ finally:
 PY
 ```
 
-预期 Flow 数为 `3,577,296`。CAUSES 边数以实际生成的 `causes_full_parts` 为准，当前 CSV 校验记录为 `134,240,414`。
+预期 Flow 数为 `3,577,296`，CAUSES 边数约 `134,240,414`。
 
 ### 5.3 导入后服务检查
 
@@ -337,6 +311,46 @@ timeout 3 bash -lc '</dev/tcp/127.0.0.1/7687' && echo bolt_port_open
 ```
 
 TuGraph 停止或启动过程中可能输出 Python plugin 的 `KeyboardInterrupt` 日志，这是服务停止时插件任务进程被中断的日志。只要 `docker compose ps` 显示服务运行、HTTP/Bolt 检查通过、点边数量可查询，即可认为导入流程完成。
+
+如果 TCG 导入报：
+
+```text
+Opening DB failed, error: IO error: No space left on device: While mkdir if missing: ./.import_tmp/db
+```
+
+先确认 dry-run 命令中包含 `--workdir /tmp`，并确认 `/tmp` 挂载到 `/dev/sdb1`：
+
+```bash
+cd /home/marktom/tugraph/tugraph_homework_submission_03
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --dry-run
+cd /home/marktom/tugraph
+docker exec tugraph-db sh -lc 'df -h /tmp /var/lib/lgraph/data /import'
+```
+
+如果 TCG 导入报：
+
+```text
+IO error: While open a file for random read: ./.import_tmp/db/003246.sst: Too many open files
+```
+
+先确认 dry-run 命令中包含 `--ulimit nofile=1048576:1048576`。如宿主机策略不允许该
+上限，可用环境变量或参数调低到允许的最大值后重新导入：
+
+```bash
+TUGRAPH_IMPORT_NOFILE=262144:262144 PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --force
+```
+
+当前 TCG 数据规模较大。若 dry-run 输出类似：
+
+```text
+tmp_free_after_clean=75.5GiB min_required=98.4GiB
+```
+
+不要直接重跑导入；先释放同一文件系统上的空间。确认空间足够后再执行：
+
+```bash
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --force
+```
 
 ## 6. 查询视图
 

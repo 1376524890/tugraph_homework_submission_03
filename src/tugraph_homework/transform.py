@@ -88,16 +88,6 @@ TCG_EDGE_FIELDS = [
     "relation_priority",
     "delta_seconds",
     "same_timestamp",
-    "matched_rule",
-    "src_flow_timestamp_epoch",
-    "dst_flow_timestamp_epoch",
-    "shared_ip",
-    "shared_endpoint",
-    "src_ip_pair",
-    "src_port_pair",
-    "dst_ip_pair",
-    "dst_port_pair",
-    "protocol_pair",
 ]
 
 
@@ -304,7 +294,7 @@ def flow_vertex(row_number: int, row: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def classify_relation(left: dict[str, Any], right: dict[str, Any]) -> tuple[str, str, str, str] | None:
+def classify_relation(left: dict[str, Any], right: dict[str, Any]) -> tuple[str, str] | None:
     if left["record_id"] == right["record_id"]:
         return None
     # CR：协议相同且五元组方向相反，近似请求-响应关系。
@@ -315,15 +305,15 @@ def classify_relation(left: dict[str, Any], right: dict[str, Any]) -> tuple[str,
         and left["dst_ip"] == right["src_ip"]
         and left["dst_port"] == right["src_port"]
     ):
-        return "CR", "reverse_five_tuple", left["src_ip"], f"{left['src_endpoint']}|{left['dst_endpoint']}"
+        return "CR", "reverse_five_tuple"
     # PR：上一条流的目的主机又成为下一条流的源主机，近似传播/代理/转发。
     if left["dst_ip"] == right["src_ip"]:
-        return "PR", "dst_ip_to_src_ip", left["dst_ip"], ""
+        return "PR", "dst_ip_to_src_ip"
     # DHR/SHR：同一源主机按源端口是否变化区分动态端口和静态端口关系。
     if left["src_ip"] == right["src_ip"] and left["src_port"] != right["src_port"]:
-        return "DHR", "same_src_ip_different_src_port", left["src_ip"], ""
+        return "DHR", "same_src_ip_different_src_port"
     if left["src_ip"] == right["src_ip"] and left["src_port"] == right["src_port"]:
-        return "SHR", "same_src_ip_same_src_port", left["src_ip"], left["src_endpoint"]
+        return "SHR", "same_src_ip_same_src_port"
     return None
 
 
@@ -340,7 +330,7 @@ def orient_flow_pair(left: dict[str, Any], right: dict[str, Any]) -> tuple[dict[
     return right, left, 0, True
 
 
-def tcg_edge(left: dict[str, Any], right: dict[str, Any], relation_type: str, matched_rule: str, shared_ip: str, shared_endpoint: str) -> dict[str, Any]:
+def tcg_edge(left: dict[str, Any], right: dict[str, Any], relation_type: str) -> dict[str, Any]:
     src, dst, delta_seconds, same_timestamp = orient_flow_pair(left, right)
     relation_id = edge_hash(src["record_id"], dst["record_id"], relation_type)
     return {
@@ -353,14 +343,4 @@ def tcg_edge(left: dict[str, Any], right: dict[str, Any], relation_type: str, ma
         "relation_priority": RELATION_PRIORITIES[relation_type],
         "delta_seconds": delta_seconds,
         "same_timestamp": same_timestamp,
-        "matched_rule": matched_rule,
-        "src_flow_timestamp_epoch": src["timestamp_epoch"],
-        "dst_flow_timestamp_epoch": dst["timestamp_epoch"],
-        "shared_ip": shared_ip,
-        "shared_endpoint": shared_endpoint,
-        "src_ip_pair": f"{left['src_ip']}|{right['src_ip']}",
-        "src_port_pair": f"{left['src_port']}|{right['src_port']}",
-        "dst_ip_pair": f"{left['dst_ip']}|{right['dst_ip']}",
-        "dst_port_pair": f"{left['dst_port']}|{right['dst_port']}",
-        "protocol_pair": f"{left['protocol']}|{right['protocol']}",
     }

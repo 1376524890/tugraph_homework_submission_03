@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -34,6 +35,22 @@ def run_command(command: list[str], dry_run: bool) -> None:
     print("$ " + display_command(command), flush=True)
     if not dry_run:
         subprocess.run(command, check=True)
+
+
+def path_size(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    if not path.exists():
+        return 0
+    total = 0
+    for item in path.rglob("*"):
+        if item.is_file():
+            total += item.stat().st_size
+    return total
+
+
+def format_gib(size: int) -> str:
+    return f"{size / 1024**3:.1f}GiB"
 
 
 def container_running(name: str) -> bool:
@@ -98,10 +115,14 @@ def generate_config(args: argparse.Namespace, graph_type: str) -> Path:
 
 def docker_import_command(args: argparse.Namespace, graph_type: str, graph: str, config_path: Path) -> list[str]:
     container_config = str(Path(args.container_import_root) / graph_type / config_path.name)
-    return [
+    command = [
         "docker",
         "run",
         "--rm",
+        "--workdir",
+        "/tmp",
+        "--ulimit",
+        f"nofile={args.nofile_limit}",
         "-v",
         f"{args.data_dir.resolve()}:{args.container_data_dir}",
         "-v",
@@ -123,6 +144,65 @@ def docker_import_command(args: argparse.Namespace, graph_type: str, graph: str,
         "--overwrite",
         "true",
     ]
+    command.extend(
+        [
+            "--parse_file_threads",
+            str(args.parse_file_threads),
+            "--parse_block_threads",
+            str(args.parse_block_threads),
+            "--generate_sst_threads",
+            str(args.generate_sst_threads),
+            "--read_rocksdb_threads",
+            str(args.read_rocksdb_threads),
+        ]
+    )
+    return command
+
+
+def clean_import_tmp(args: argparse.Namespace) -> None:
+    import_tmp = args.tmp_dir / ".import_tmp"
+    if not import_tmp.exists():
+        return
+    tmp_root = args.tmp_dir.resolve()
+    resolved = import_tmp.resolve()
+    if tmp_root not in resolved.parents:
+        raise SystemExit(f"Refusing to remove unexpected import temp path: {resolved}")
+    size = path_size(import_tmp)
+    if args.dry_run:
+        print(f"would_remove_import_tmp path={import_tmp} size={format_gib(size)}", flush=True)
+        return
+    print(f"remove_import_tmp path={import_tmp} size={format_gib(size)}", flush=True)
+    shutil.rmtree(import_tmp)
+
+
+def preflight_graph_import(args: argparse.Namespace, graph_type: str) -> None:
+    input_dir = args.import_root / graph_type
+    input_size = path_size(input_dir)
+    free_bytes = shutil.disk_usage(args.tmp_dir).free
+    reclaimable_bytes = 0
+    if args.dry_run and args.clean_tmp:
+        reclaimable_bytes = path_size(args.tmp_dir / ".import_tmp")
+        free_bytes += reclaimable_bytes
+    required_bytes = int(input_size * args.min_free_multiplier)
+    print(
+        "preflight "
+        f"graph_type={graph_type} input_size={format_gib(input_size)} "
+        f"tmp_free_after_clean={format_gib(free_bytes)} "
+        f"reclaimable_tmp={format_gib(reclaimable_bytes)} "
+        f"min_required={format_gib(required_bytes)} "
+        f"nofile={args.nofile_limit} "
+        f"threads=parse_file:{args.parse_file_threads},parse_block:{args.parse_block_threads},"
+        f"generate_sst:{args.generate_sst_threads},read_rocksdb:{args.read_rocksdb_threads}",
+        flush=True,
+    )
+    if args.skip_preflight:
+        return
+    if free_bytes < required_bytes:
+        raise SystemExit(
+            f"Not enough free space for stable {graph_type} import: tmp/data filesystem has "
+            f"{format_gib(free_bytes)} free, require at least {format_gib(required_bytes)} "
+            f"({args.min_free_multiplier:g}x input size). Free disk space or pass --skip-preflight."
+        )
 
 
 def import_graphs(args: argparse.Namespace) -> None:
@@ -133,6 +213,11 @@ def import_graphs(args: argparse.Namespace) -> None:
 
     graph_names = {graph_type: args.graph or DEFAULT_GRAPHS[graph_type] for graph_type in graph_types}
     config_paths = {graph_type: generate_config(args, graph_type) for graph_type in graph_types}
+
+    if args.clean_tmp:
+        clean_import_tmp(args)
+    for graph_type in graph_types:
+        preflight_graph_import(args, graph_type)
 
     for graph_type, graph in graph_names.items():
         if args.dry_run:
@@ -175,6 +260,29 @@ def main() -> None:
     parser.add_argument("--tmp-dir", type=Path, default=ROOT / "docker" / "tugraph-tmp")
     parser.add_argument("--container-data-dir", default="/var/lib/lgraph/data")
     parser.add_argument("--container-import-root", default="/import")
+    parser.add_argument(
+        "--nofile-limit",
+        default=os.getenv("TUGRAPH_IMPORT_NOFILE", "1048576:1048576"),
+        help="Docker nofile ulimit for the temporary lgraph_import container, formatted as soft:hard.",
+    )
+    parser.add_argument("--parse-file-threads", type=int, default=1)
+    parser.add_argument("--parse-block-threads", type=int, default=1)
+    parser.add_argument("--generate-sst-threads", type=int, default=4)
+    parser.add_argument("--read-rocksdb-threads", type=int, default=4)
+    parser.add_argument(
+        "--min-free-multiplier",
+        type=float,
+        default=float(os.getenv("TUGRAPH_IMPORT_MIN_FREE_MULTIPLIER", "3.0")),
+        help="Require this multiple of the graph import input size as free space before import.",
+    )
+    parser.add_argument("--skip-preflight", action="store_true", help="Skip free-space preflight checks.")
+    parser.add_argument(
+        "--no-clean-tmp",
+        dest="clean_tmp",
+        action="store_false",
+        help="Do not remove docker/tugraph-tmp/.import_tmp before importing.",
+    )
+    parser.set_defaults(clean_tmp=True)
     parser.add_argument("--compose-file", type=Path, default=ROOT.parent / "docker-compose.yml")
     parser.add_argument("--compose-env-file", type=Path, default=ROOT.parent / ".env")
     parser.add_argument("--compose-service", default="tugraph-db")

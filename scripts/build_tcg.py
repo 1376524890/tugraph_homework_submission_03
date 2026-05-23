@@ -357,7 +357,7 @@ def timestamp_pair_flows(
             yield left, right_sorted[candidate_index]
 
 
-def relation_pairs(flows: list[dict[str, Any]], relation_type: str, max_delta_seconds: int | None) -> Iterator[tuple[dict[str, Any], dict[str, Any], str, str, str]]:
+def relation_pairs(flows: list[dict[str, Any]], relation_type: str, max_delta_seconds: int | None) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
     if relation_type == "CR":
         # CR 用五元组分桶，只在反向五元组桶之间枚举，避免全表两两比较。
         groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
@@ -377,7 +377,7 @@ def relation_pairs(flows: list[dict[str, Any]], relation_type: str, max_delta_se
             for left, right in iterable:
                 relation = classify_relation(left, right)
                 if relation and relation[0] == "CR":
-                    yield left, right, relation[1], relation[2], relation[3]
+                    yield left, right
             seen_keys.add(key)
             seen_keys.add(reverse_key)
         return
@@ -393,7 +393,7 @@ def relation_pairs(flows: list[dict[str, Any]], relation_type: str, max_delta_se
             for left, right in timestamp_pair_flows(by_dst_ip[ip], by_src_ip[ip], max_delta_seconds):
                 relation = classify_relation(left, right)
                 if relation and relation[0] == "PR":
-                    yield left, right, relation[1], relation[2], relation[3]
+                    yield left, right
         return
 
     if relation_type == "DHR":
@@ -407,7 +407,7 @@ def relation_pairs(flows: list[dict[str, Any]], relation_type: str, max_delta_se
                     continue
                 relation = classify_relation(left, right)
                 if relation and relation[0] == "DHR":
-                    yield left, right, relation[1], relation[2], relation[3]
+                    yield left, right
         return
 
     # SHR 在同一 (src_ip, src_port) 桶内两两配对。
@@ -418,7 +418,7 @@ def relation_pairs(flows: list[dict[str, Any]], relation_type: str, max_delta_se
         for left, right in timestamp_pair_flows(group, group, max_delta_seconds, same_group=True):
             relation = classify_relation(left, right)
             if relation and relation[0] == "SHR":
-                yield left, right, relation[1], relation[2], relation[3]
+                yield left, right
 
 
 class PartitionWriter:
@@ -536,12 +536,12 @@ def build_edges(
     windows = relation_windows(max_delta_seconds, relation_window_overrides)
     try:
         for relation_type in relation_types:
-            for left, right, matched_rule, shared_ip, shared_endpoint in progress_iter(
+            for left, right in progress_iter(
                 relation_pairs(flows, relation_type, windows[relation_type]),
                 f"build {relation_type} edges",
                 "edges",
             ):
-                edge = tcg_edge(left, right, relation_type, matched_rule, shared_ip, shared_endpoint)
+                edge = tcg_edge(left, right, relation_type)
                 if not deduper.add(edge["src_record_id"], edge["dst_record_id"]):
                     continue
                 writer.write(edge)
