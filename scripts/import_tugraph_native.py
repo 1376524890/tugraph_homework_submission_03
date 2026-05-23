@@ -120,6 +120,8 @@ def docker_import_command(args: argparse.Namespace, graph_type: str, graph: str,
         args.user,
         "--password",
         args.password,
+        "--overwrite",
+        "true",
     ]
 
 

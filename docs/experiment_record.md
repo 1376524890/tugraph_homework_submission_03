@@ -276,3 +276,135 @@ docker compose up -d
 
 `/tmp` 写入测试已通过，确认临时目录使用宿主机
 `docker/tugraph-tmp` 挂载，不再写入 Docker overlay。
+
+## 2026-05-23 HCG 原生导入
+
+首次执行 HCG 导入时，`scripts/import_tugraph_native.py` 先通过 Bolt 创建了空的
+`hcg` 图，随后 `lgraph_import` 的 FROM SCRATCH 模式发现同名图已存在并拒绝导入：
+
+```text
+Graph already exists. If you want to overwrite the graph, use --overwrite true.
+```
+
+导入脚本已更新：保留“目标图已有数据 label 时必须显式 `--force`”的保护；通过该
+保护后，调用 `lgraph_import` 时增加 `--overwrite true`，允许覆盖脚本刚创建的空图
+或已确认可覆盖的目标图。
+
+本地 Python 环境补充安装 Bolt 驱动：
+
+```bash
+python3 -m pip install neo4j -i https://mirrors.aliyun.com/pypi/simple
+```
+
+重新执行 HCG 导入：
+
+```bash
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg
+```
+
+导入结果：
+
+| 项目 | 结果 |
+| --- | ---: |
+| `lgraph_import` 耗时 | 44.3432 秒 |
+| `Endpoint` 顶点 | 935,600 |
+| `COMMUNICATES` 边 | 1,716,084 |
+
+导入后 `tugraph-db` 已由 Docker Compose 自动启动，HTTP `7070` 返回 `200`，Bolt
+`7687` 可连接，`/tmp` 仍挂载在宿主机 `docker/tugraph-tmp`。
+
+## 2026-05-23 手动复现流程
+
+以下流程可从仓库根目录手动复现本次容器启动、挂载确认、HCG 导入和结果验证。
+
+1. 启动 Compose 服务：
+
+```bash
+cd /home/marktom/tugraph
+docker compose up -d
+docker compose ps
+```
+
+2. 确认数据、日志、导入目录和临时目录挂载：
+
+```bash
+docker exec tugraph-db sh -lc 'for p in /var/lib/lgraph/data /var/log/lgraph_log /import /tmp; do printf "%s -> " "$p"; df -h "$p" | tail -1; done'
+```
+
+期望 `/tmp` 与 `/var/lib/lgraph/data`、`/import` 一样位于 `/dev/sdb1`，避免写入
+Docker overlay。
+
+3. 确认导入配置和 TCG 分片可见：
+
+```bash
+docker exec tugraph-db sh -lc 'ls -lh /import/hcg/import.json /import/tcg/import.json; find /import/tcg/causes_full_parts -type f -name "*.csv" | wc -l'
+```
+
+当前结果为 HCG/TCG 两个 `import.json` 均可见，TCG CAUSES CSV 分片数为 `135`。
+
+4. 安装本地 Bolt 驱动：
+
+```bash
+python3 -m pip install neo4j -i https://mirrors.aliyun.com/pypi/simple
+```
+
+5. 预演 HCG 导入命令：
+
+```bash
+cd /home/marktom/tugraph/tugraph_homework_submission_03
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg --dry-run
+```
+
+预演命令应包含：
+
+```text
+docker compose ... stop tugraph-db
+docker run --rm ... -v .../docker/tugraph-import:/import -v .../docker/tugraph-tmp:/tmp ... lgraph_import ... --overwrite true
+docker compose ... start tugraph-db
+```
+
+6. 执行 HCG 导入。首次导入使用：
+
+```bash
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg
+```
+
+如果当前环境已经导入过 HCG，再次复现导入需要显式确认覆盖：
+
+```bash
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg --force
+```
+
+7. 验证服务和端口：
+
+```bash
+cd /home/marktom/tugraph
+docker compose ps
+curl --max-time 5 -s -o /tmp/tugraph-http-body -w 'http_code=%{http_code}\n' http://127.0.0.1:7070/
+timeout 3 bash -lc '</dev/tcp/127.0.0.1/7687' && echo bolt_port_open
+```
+
+8. 验证 HCG 导入结果：
+
+```bash
+cd /home/marktom/tugraph/tugraph_homework_submission_03
+PYTHONPATH=src python3 - <<'PY'
+from neo4j import GraphDatabase
+from tugraph_homework.common import DEFAULT_URI, DEFAULT_USER, DEFAULT_PASSWORD
+
+driver = GraphDatabase.driver(DEFAULT_URI, auth=(DEFAULT_USER, DEFAULT_PASSWORD))
+try:
+    with driver.session(database="hcg") as session:
+        print("Endpoint=", session.run("MATCH (n:Endpoint) RETURN count(n) AS c").single()["c"])
+        print("COMMUNICATES=", session.run("MATCH ()-[r:COMMUNICATES]->() RETURN count(r) AS c").single()["c"])
+finally:
+    driver.close()
+PY
+```
+
+当前复现结果：
+
+```text
+Endpoint=935600
+COMMUNICATES=1716084
+```

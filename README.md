@@ -257,6 +257,23 @@ HCG 和 TCG 数据统一使用 `scripts/import_tugraph_native.py`。该脚本先
 确保目标图存在，再通过 Docker Compose 停止 `tugraph-db`，用 TuGraph 原生
 `lgraph_import` 导入 CSV，最后通过 Docker Compose 启动服务。Bolt 不写入 CSV 数据。
 
+手动复现前确认当前 Python 环境可导入 Bolt 驱动：
+
+```bash
+python3 -m pip install neo4j -i https://mirrors.aliyun.com/pypi/simple
+```
+
+启动 TuGraph 服务并确认挂载：
+
+```bash
+cd /home/marktom/tugraph
+docker compose up -d
+docker compose ps
+docker exec tugraph-db sh -lc 'for p in /var/lib/lgraph/data /var/log/lgraph_log /import /tmp; do printf "%s -> " "$p"; df -h "$p" | tail -1; done'
+```
+
+`/tmp` 应显示在宿主机 `/home` 所在文件系统上，而不是 Docker overlay。
+
 生成 HCG 和 TCG CSV：
 
 ```bash
@@ -280,11 +297,38 @@ PYTHONPATH=src python3 scripts/import_tugraph_native.py \
 执行 HCG 导入：
 
 ```bash
-set -a
-. ./.env
-set +a
-
+cd /home/marktom/tugraph/tugraph_homework_submission_03
 PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg
+```
+
+如果当前环境已经导入过 HCG，再次复现导入时需要显式确认覆盖：
+
+```bash
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg --force
+```
+
+导入后验证 HCG 点边数量：
+
+```bash
+PYTHONPATH=src python3 - <<'PY'
+from neo4j import GraphDatabase
+from tugraph_homework.common import DEFAULT_URI, DEFAULT_USER, DEFAULT_PASSWORD
+
+driver = GraphDatabase.driver(DEFAULT_URI, auth=(DEFAULT_USER, DEFAULT_PASSWORD))
+try:
+    with driver.session(database="hcg") as session:
+        print("Endpoint=", session.run("MATCH (n:Endpoint) RETURN count(n) AS c").single()["c"])
+        print("COMMUNICATES=", session.run("MATCH ()-[r:COMMUNICATES]->() RETURN count(r) AS c").single()["c"])
+finally:
+    driver.close()
+PY
+```
+
+当前 HCG 导入验证结果应为：
+
+```text
+Endpoint=935600
+COMMUNICATES=1716084
 ```
 
 导入脚本会生成 `docker/tugraph-import/<graph-type>/import.json`。服务容器由

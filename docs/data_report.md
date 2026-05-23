@@ -200,6 +200,19 @@ cd ..
 docker compose up -d
 ```
 
+确认服务状态和关键挂载：
+
+```bash
+docker compose ps
+docker exec tugraph-db sh -lc 'for p in /var/lib/lgraph/data /var/log/lgraph_log /import /tmp; do printf "%s -> " "$p"; df -h "$p" | tail -1; done'
+```
+
+本地导入脚本需要 Python Bolt 驱动：
+
+```bash
+python3 -m pip install neo4j -i https://mirrors.aliyun.com/pypi/simple
+```
+
 预演 HCG 导入命令：
 
 ```bash
@@ -211,12 +224,33 @@ PYTHONPATH=src python3 scripts/import_tugraph_native.py \
 执行 HCG 导入：
 
 ```bash
-set -a
-. ./.env
-set +a
-
 PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg
 ```
+
+如果 HCG 已导入过，重复执行需要显式确认覆盖：
+
+```bash
+PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type hcg --force
+```
+
+导入后可用 Bolt 查询验证：
+
+```bash
+PYTHONPATH=src python3 - <<'PY'
+from neo4j import GraphDatabase
+from tugraph_homework.common import DEFAULT_URI, DEFAULT_USER, DEFAULT_PASSWORD
+
+driver = GraphDatabase.driver(DEFAULT_URI, auth=(DEFAULT_USER, DEFAULT_PASSWORD))
+try:
+    with driver.session(database="hcg") as session:
+        print("Endpoint=", session.run("MATCH (n:Endpoint) RETURN count(n) AS c").single()["c"])
+        print("COMMUNICATES=", session.run("MATCH ()-[r:COMMUNICATES]->() RETURN count(r) AS c").single()["c"])
+finally:
+    driver.close()
+PY
+```
+
+当前 HCG 验证结果为 `Endpoint=935600`、`COMMUNICATES=1716084`。
 
 TCG 全量导入使用同一入口，但执行前需要重新确认磁盘空间：
 
