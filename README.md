@@ -439,6 +439,25 @@ docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt
 docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
 ```
 
+### 6.3 批处理运行
+
+如果你想按批看到耗时和剩余时间估算，用批处理副本：
+
+```bash
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure_batch.py \
+  --upload \
+  --delete-first \
+  --call \
+  --batch-size 10000 \
+  --walk-length 20 \
+  --num-walks 5 \
+  --output-path docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt \
+  --id-map-path docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --timeout 3600
+```
+
+它会把每批结果写到临时分片目录，最后合并成完整 walks 和 id map 文件。
+
 ## 7. 查询视图
 
 查询视图从 TCG 的 `causes_full_parts` 派生，用于按 `delta_seconds`、关系类型和前驱/后继数量生成子图：

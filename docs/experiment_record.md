@@ -1020,3 +1020,21 @@ PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure.py \
 docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt
 docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
 ```
+
+## 2026-05-24 HCG Node2Vec 批处理副本
+
+为减少全量运行的风险，新增批处理版 Python 存储过程与调用脚本：
+
+| 文件 | 说明 |
+| --- | --- |
+| `procedures/hcg_node2vec_walk_py.py` | 单次调用版，适合 smoke 和小规模验证 |
+| `procedures/hcg_node2vec_walk_py_batch.py` | 批处理版，支持 `start_offset`，适合全量运行 |
+| `scripts/run_hcg_node2vec_procedure.py` | 单次调用器 |
+| `scripts/run_hcg_node2vec_procedure_batch.py` | 批处理调用器，带 ETA 估算和分片合并 |
+
+当前 TuGraph 中已上传的 Python 存储过程：
+
+- `hcg_node2vec_walk_py`
+- `hcg_node2vec_walk_py_batch`
+
+批处理脚本会先统计 HCG 中有出边的起点数，再按批次调用数据库侧 procedure，最后把 walks 和 id map 分片合并为完整文件。全量运行建议从 `--batch-size 10000` 起步，不要再用 `batch-size=1` 这种会产生过多批次日志的参数。
