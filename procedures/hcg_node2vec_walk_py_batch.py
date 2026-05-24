@@ -2,13 +2,10 @@
 """Batched HCG node2vec random-walk Python stored procedure for TuGraph."""
 
 import json
+import math
 import os
 import random
 import time
-
-
-def _vid_token(vid):
-    return str(int(vid))
 
 
 def _safe_int(value, default):
@@ -25,6 +22,49 @@ def _safe_float(value, default):
         return default
 
 
+def _field_value(item, field_name):
+    try:
+        return item[field_name]
+    except Exception:
+        pass
+    try:
+        return item.GetField(field_name)
+    except Exception:
+        return None
+
+
+def _field_to_float(value, default=1.0):
+    if value is None:
+        return default
+    for attr in ("AsInt64", "AsDouble", "AsFloat", "integer", "real"):
+        try:
+            return float(getattr(value, attr)())
+        except Exception:
+            pass
+    try:
+        return float(value)
+    except Exception:
+        pass
+    try:
+        return float(str(value))
+    except Exception:
+        return default
+
+
+def _field_to_string(value, default=""):
+    if value is None:
+        return default
+    for attr in ("AsString", "ToString", "string"):
+        try:
+            return str(getattr(value, attr)())
+        except Exception:
+            pass
+    try:
+        return str(value)
+    except Exception:
+        return default
+
+
 def _parse_params(input_text):
     params = json.loads(input_text or "{}")
     walk_length = _safe_int(params.get("walk_length", params.get("walk_len", 20)), 20)
@@ -36,6 +76,8 @@ def _parse_params(input_text):
     start_vid = _safe_int(params.get("start_vid", -1), -1)
     seed = _safe_int(params.get("seed", 20260524), 20260524)
     max_elapsed_seconds = _safe_float(params.get("max_elapsed_seconds", 0), 0)
+    weight_field = params.get("weight_field", "flow_count")
+    weight_transform = params.get("weight_transform", "log1p")
     return {
         "output_path": params.get("output_path", "/tmp/hcg_walks_node2vec_py_batch.txt"),
         "id_map_path": params.get("id_map_path", "/tmp/hcg_node_id_map_node2vec_py_batch.csv"),
@@ -50,6 +92,9 @@ def _parse_params(input_text):
         "return_preview_lines": max(0, _safe_int(params.get("return_preview_lines", 5), 5)),
         "only_start_nodes_with_out_edges": bool(params.get("only_start_nodes_with_out_edges", True)),
         "max_elapsed_seconds": max_elapsed_seconds if max_elapsed_seconds > 0 else 0,
+        "weight_field": weight_field or "flow_count",
+        "weight_transform": weight_transform if weight_transform in ("log1p", "none", "sqrt") else "log1p",
+        "token_field": params.get("token_field", "endpoint_id") or "endpoint_id",
     }
 
 
@@ -74,9 +119,37 @@ def Process(db, input):
     walk_count = 0
     completed_start_node_count = 0
     stopped_reason = ""
+    token_cache = {}
+    weight_fallback_count = 0
 
     def time_budget_exceeded():
         return params["max_elapsed_seconds"] > 0 and (time.time() - started) >= params["max_elapsed_seconds"]
+
+    def edge_weight(eit):
+        nonlocal weight_fallback_count
+        raw = _field_to_float(_field_value(eit, params["weight_field"]), 1.0)
+        if raw <= 0:
+            raw = 1.0
+            weight_fallback_count += 1
+        if params["weight_transform"] == "none":
+            return max(raw, 1e-12)
+        if params["weight_transform"] == "sqrt":
+            return max(math.sqrt(raw), 1e-12)
+        return max(math.log1p(raw), 1e-12)
+
+    def vertex_token(vid):
+        vid = int(vid)
+        if vid in token_cache:
+            return token_cache[vid]
+        token = str(vid)
+        try:
+            vit = txn.GetVertexIterator(vid)
+            if vit.IsValid():
+                token = _field_to_string(_field_value(vit, params["token_field"]), token) or token
+        except Exception:
+            pass
+        token_cache[vid] = token
+        return token
 
     def get_neighbors(vid):
         vid = int(vid)
@@ -87,10 +160,24 @@ def Process(db, input):
         if vit.IsValid():
             eit = vit.GetOutEdgeIterator()
             while eit.IsValid():
-                neighbors.append(int(eit.GetDst()))
+                neighbors.append((int(eit.GetDst()), edge_weight(eit)))
                 eit.Next()
         neighbor_cache[vid] = neighbors
         return neighbors
+
+    def choose_weighted(entries):
+        total = 0.0
+        for _, weight in entries:
+            total += weight
+        if total <= 0:
+            return random.choice(entries)[0]
+        threshold = random.random() * total
+        cumulative = 0.0
+        for dst, weight in entries:
+            cumulative += weight
+            if cumulative >= threshold:
+                return dst
+        return entries[-1][0]
 
     def pick_start_nodes():
         if params["start_vid"] >= 0:
@@ -128,25 +215,26 @@ def Process(db, input):
                         neighbors = get_neighbors(current)
                         if not neighbors:
                             break
-                        if previous is None:
-                            next_node = random.choice(neighbors)
+                        if previous is None or (params["p"] == 1.0 and params["q"] == 1.0):
+                            next_node = choose_weighted(neighbors)
                         else:
-                            previous_neighbors = set(get_neighbors(previous))
-                            weights = []
-                            for candidate in neighbors:
+                            previous_neighbors = {dst for dst, _ in get_neighbors(previous)}
+                            weighted_candidates = []
+                            for candidate, edge_weight_value in neighbors:
                                 if candidate == previous:
-                                    weights.append(1.0 / params["p"])
+                                    bias = 1.0 / params["p"]
                                 elif candidate in previous_neighbors:
-                                    weights.append(1.0)
+                                    bias = 1.0
                                 else:
-                                    weights.append(1.0 / params["q"])
-                            next_node = random.choices(neighbors, weights=weights, k=1)[0]
+                                    bias = 1.0 / params["q"]
+                                weighted_candidates.append((candidate, edge_weight_value * bias))
+                            next_node = choose_weighted(weighted_candidates)
                         walk.append(int(next_node))
                         previous = current
                         current = int(next_node)
 
                     touched.update(walk)
-                    line = " ".join(_vid_token(vid) for vid in walk)
+                    line = " ".join(vertex_token(vid) for vid in walk)
                     walks_out.write(line + "\n")
                     if len(preview) < params["return_preview_lines"]:
                         preview.append(line)
@@ -159,7 +247,8 @@ def Process(db, input):
         with open(params["id_map_path"], "w", encoding="utf-8") as id_map_out:
             id_map_out.write("vid,token\n")
             for vid in sorted(touched):
-                id_map_out.write('{},"{}"\n'.format(vid, _vid_token(vid)))
+                token = vertex_token(vid).replace('"', '""')
+                id_map_out.write('{},"{}"\n'.format(vid, token))
 
         response = {
             "status": "ok",
@@ -177,8 +266,13 @@ def Process(db, input):
             "stopped_reason": stopped_reason,
             "p": params["p"],
             "q": params["q"],
+            "weight_field": params["weight_field"],
+            "weight_transform": params["weight_transform"],
+            "token_field": params["token_field"],
+            "weight_fallback_count": weight_fallback_count,
             "touched_node_count": len(touched),
             "cached_neighbor_count": len(neighbor_cache),
+            "cached_token_count": len(token_cache),
             "preview": preview,
             "elapsed_seconds": time.time() - started,
         }

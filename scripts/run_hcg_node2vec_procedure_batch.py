@@ -96,25 +96,26 @@ def append_batch_outputs(batch_walks: Path, batch_id_map: Path, final_walks: Pat
         with final_walks.open("a", encoding="utf-8") as out:
             out.write(batch_walks.read_text(encoding="utf-8"))
 
-    tokens: set[str] = set()
+    id_map: dict[str, str] = {}
     if final_id_map.exists():
         with final_id_map.open("r", encoding="utf-8") as fh:
-            next(fh, None)
-            for line in fh:
-                line = line.strip()
-                if line:
-                    tokens.add(line.split(",", 1)[0])
+            for row in csv.DictReader(fh):
+                vid = row.get("vid", "").strip()
+                token = row.get("token", "").strip()
+                if vid:
+                    id_map[vid] = token or vid
     if batch_id_map.exists():
         with batch_id_map.open("r", encoding="utf-8") as fh:
-            next(fh, None)
-            for line in fh:
-                line = line.strip()
-                if line:
-                    tokens.add(line.split(",", 1)[0])
-    with final_id_map.open("w", encoding="utf-8") as out:
-        out.write("vid,token\n")
-        for token in sorted(tokens, key=lambda s: int(s)):
-            out.write(f'{token},"{token}"\n')
+            for row in csv.DictReader(fh):
+                vid = row.get("vid", "").strip()
+                token = row.get("token", "").strip()
+                if vid:
+                    id_map[vid] = token or vid
+    with final_id_map.open("w", encoding="utf-8", newline="") as out:
+        writer = csv.DictWriter(out, fieldnames=["vid", "token"])
+        writer.writeheader()
+        for vid in sorted(id_map, key=lambda s: int(s)):
+            writer.writerow({"vid": vid, "token": id_map[vid]})
 
 
 def list_task_runners() -> dict[str, dict[str, str | float]]:
@@ -335,20 +336,19 @@ def merge_walk_parts(parts_dir: Path, final_walks: Path, final_id_map: Path) -> 
     with final_walks.open("w", encoding="utf-8") as out:
         for path in part_walks:
             out.write(path.read_text(encoding="utf-8"))
-    merged_tokens: set[str] = set()
+    id_map: dict[str, str] = {}
     for path in part_id_maps:
         with path.open("r", encoding="utf-8") as fh:
-            next(fh, None)
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                token = line.split(",", 1)[0]
-                merged_tokens.add(token)
-    with final_id_map.open("w", encoding="utf-8") as out:
-        out.write("vid,token\n")
-        for token in sorted(merged_tokens, key=lambda s: int(s)):
-            out.write(f'{token},"{token}"\n')
+            for row in csv.DictReader(fh):
+                vid = row.get("vid", "").strip()
+                token = row.get("token", "").strip()
+                if vid:
+                    id_map[vid] = token or vid
+    with final_id_map.open("w", encoding="utf-8", newline="") as out:
+        writer = csv.DictWriter(out, fieldnames=["vid", "token"])
+        writer.writeheader()
+        for vid in sorted(id_map, key=lambda s: int(s)):
+            writer.writerow({"vid": vid, "token": id_map[vid]})
 
 
 def main() -> int:

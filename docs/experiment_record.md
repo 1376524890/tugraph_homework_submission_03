@@ -1075,7 +1075,7 @@ python -m py_compile scripts/run_hcg_node2vec_procedure_batch.py
 
 参数适配结论：
 
-- `walk_length=20,num_walks=5,p=1.0,q=1.0` 符合后续全量 node2vec / DeepWalk 基线实验配置。
+- `walk_length=20,num_walks=5,p=1.0,q=1.0` 符合后续 HCG random walks 配置。
 - `batch_size=1000` 可以正确运行，但全量约 `865,950 / 1000 = 866` 批，调用和清理开销偏多。
 - 文档建议全量实验显式使用 `--batch-size 10000`，约 `87` 批，更适合长任务执行。
 - 本次按要求**不修改脚本默认 batch size**，保留 `DEFAULT_BATCH_SIZE=1000`；后续全量命令通过命令行参数覆盖。
@@ -1090,3 +1090,151 @@ PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure_batch.py \
   --p 1.0 \
   --q 1.0
 ```
+
+## 2026-05-24 实验设计调整：两阶段 HCG Embedding 分类流程
+
+根据当前实验目标，后续不再需要 F0-F4 baseline / 消融实验设定。不再生成 `F0`、`F1`、`F2`、`F3`、`F4` 数据集，也不再写 baseline 对比。后续只报告 HCG 图嵌入分类流程和分类效果。
+
+### 阶段一：HCG 图嵌入特征提取
+
+1. 使用 TuGraph 中已导入的 HCG 图作为输入，不从原始 CSV 或本地 `communicates.csv` 重新建图。
+2. Python 存储过程在数据库内遍历 HCG 的 `Endpoint` 顶点和 `COMMUNICATES` 有向边。
+3. 边权读取 `COMMUNICATES.flow_count`，采样权重使用 `log1p(flow_count)`。
+4. 使用 node2vec `p=1,q=1` 在数据库内生成 random walks。
+5. 使用 Word2Vec / skip-gram 训练 Endpoint embedding。
+6. 输出 `data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet`。
+7. 检查 embedding 行数、维度、NaN/Inf、OOV 和 nearest neighbors。
+
+当前正在执行的 TuGraph batch procedure 与阶段一目标有交集，但还不是最终阶段一实现：
+
+- 一致点：使用 HCG 有向图；使用 node2vec 参数 `p=1,q=1`；生成 Endpoint random walks。
+- 不一致点：当前 TuGraph Python procedure 从已导入图读取邻居，但仍是均匀邻居采样，未读取 `COMMUNICATES.flow_count` 并按 `log1p(flow_count)` 做加权采样。
+- 后续正式阶段一应继续使用数据库内 Python 存储过程，不恢复 C++ 方案；需要把 Python procedure 改为读取边属性 `flow_count`，生成加权 walks 后再训练 `hcg_endpoint_node2vec_d64.parquet`。
+
+### 阶段二：Flow 分类任务
+
+1. 读取 `data/processed/tcg/flows.csv`。
+2. 读取 `data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet`。
+3. 对每条 Flow 获取 `src_emb` 和 `dst_emb`。
+4. 构造 Flow 图嵌入特征：`src_emb`, `dst_emb`, `abs(src_emb - dst_emb)`, `src_emb * dst_emb`。
+5. 分类目标优先使用 `protocol_name`；如果不适合，则使用 `l7_protocol`。
+6. 如果 `label` 全为 `BENIGN`，不做异常检测分类。
+7. 训练 `DecisionTree`、`HistGradientBoosting` 或 `LightGBM`、`LogisticRegression`。
+8. KNN 只做抽样实验。
+9. 输出 Accuracy、Macro-F1、Weighted-F1、per-class F1 和 confusion matrix。
+
+标签泄漏约束：
+
+- 当前分类输入只使用 HCG node2vec 生成的 Endpoint embedding 组合特征。
+- 如果分类目标是 `protocol_name`，不得使用 `protocol_name`、`l7_protocol`、`protocol_name_set`、`major_protocol_name`、`l7_protocol_entropy` 等直接或间接泄漏标签的字段。
+- `label` 当前若全为 `BENIGN`，不作为异常检测分类目标。
+
+### 后续脚本规划
+
+后续只规划两个主脚本：
+
+| 脚本 | 输入 | 输出 | 说明 |
+| --- | --- | --- | --- |
+| `scripts/run_hcg_node2vec_procedure_batch.py` | TuGraph 中已导入的 HCG 图 | `docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt` 和 id map | 上传/调用 Python 存储过程，在数据库内按 `log1p(flow_count)` 生成 HCG weighted walks。 |
+| `scripts/train_hcg_endpoint_node2vec.py` | walks 文件和 id map | `data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet` | 使用 Word2Vec / skip-gram 训练并检查 Endpoint embedding。 |
+| `scripts/run_flow_embedding_classification.py` | `data/processed/tcg/flows.csv` 和 `hcg_endpoint_node2vec_d64.parquet` | 分类指标报告和 confusion matrix | 构造 Flow embedding 组合特征，训练分类器并输出 Accuracy、Macro-F1、Weighted-F1、per-class F1。 |
+
+不再规划或实现：
+
+- `F0`、`F1`、`F2`、`F3`、`F4` 特征数据集生成。
+- baseline 对比表。
+- 消融实验脚本。
+- 基于本地 CSV 重新建 HCG 图的阶段一替代流程。
+
+## 2026-05-24 HCG Python 存储过程加权化
+
+根据最终阶段一要求，已将 `procedures/hcg_node2vec_walk_py_batch.py` 改为数据库内加权 random walk 实现，不恢复 C++ 方案，也不基于本地 CSV 重新建图。
+
+本次修改：
+
+- 在 TuGraph 数据库内读取已导入 HCG 图。
+- 遍历 `Endpoint` 顶点和 `COMMUNICATES` 有向边。
+- 默认读取边属性 `flow_count`。
+- 默认使用 `log1p(flow_count)` 作为采样权重。
+- `p=1,q=1` 时执行加权随机游走，避免旧版本的均匀邻居采样。
+- walk token 默认使用 `Endpoint.endpoint_id`，便于后续与 `data/processed/tcg/flows.csv` 的 `src_endpoint` / `dst_endpoint` 对齐。
+- id map 输出保留 `vid -> endpoint_id` 映射。
+- response 增加 `weight_field`, `weight_transform`, `token_field`, `weight_fallback_count` 等字段，便于确认实际采样配置。
+
+同时修复了 `scripts/run_hcg_node2vec_procedure_batch.py` 中 id map 合并逻辑。旧逻辑会把 batch id map 合并回数字 token；新逻辑使用 `csv.DictReader/DictWriter` 保留真实 `vid,token` 映射。
+
+语法检查：
+
+```bash
+python -m py_compile scripts/run_hcg_node2vec_procedure_batch.py procedures/hcg_node2vec_walk_py_batch.py
+```
+
+已上传更新数据库中的 Python 存储过程：
+
+```bash
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure_batch.py \
+  --upload \
+  --delete-first \
+  --no-call \
+  --no-health-check \
+  --delete-timeout 20
+```
+
+上传日志：
+
+```text
+upload=ok
+```
+
+上传后执行 5 个起点 smoke：
+
+```bash
+rm -f docker/tugraph-tmp/hcg_walks_node2vec_weighted_smoke.txt \
+      docker/tugraph-tmp/hcg_node_id_map_node2vec_weighted_smoke.csv
+
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure_batch.py \
+  --no-upload \
+  --call \
+  --no-health-check \
+  --batch-size 5 \
+  --max-batches 1 \
+  --start-offset 0 \
+  --walk-length 5 \
+  --num-walks 1 \
+  --timeout 120 \
+  --procedure-time-budget 60 \
+  --output-path docker/tugraph-tmp/hcg_walks_node2vec_weighted_smoke.txt \
+  --id-map-path docker/tugraph-tmp/hcg_node_id_map_node2vec_weighted_smoke.csv
+```
+
+smoke response 关键字段：
+
+| 字段 | 值 |
+| --- | --- |
+| `status` | `ok` |
+| `batch_start_count` | `5` |
+| `batch_walk_count` | `5` |
+| `walk_length` | `5` |
+| `num_walks` | `1` |
+| `p` | `1.0` |
+| `q` | `1.0` |
+| `weight_field` | `flow_count` |
+| `weight_transform` | `log1p` |
+| `token_field` | `endpoint_id` |
+| `weight_fallback_count` | `0` |
+
+smoke walk 输出已经是 endpoint token：
+
+```text
+172.19.1.46:52422 10.200.7.7:3128 192.168.180.37:1923 10.200.7.7:3128 192.168.42.95:51875
+```
+
+smoke id map 输出已经保留 endpoint 映射：
+
+```csv
+vid,token
+0,172.19.1.46:52422
+1,10.200.7.7:3128
+```
+
+结论：当前数据库中的 `hcg_node2vec_walk_py_batch` 已更新为符合阶段一要求的 Python 存储过程版本。后续全量阶段一应使用该存储过程生成加权 HCG walks，再训练 `data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet`。

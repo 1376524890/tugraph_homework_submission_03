@@ -190,7 +190,45 @@ python3 scripts/check_walks_file.py \
 data/features/hcg/reports/hcg_walks_smoke_check.md
 ```
 
-## 后续 Python word2vec 训练命令模板
+## 后续两阶段实验流程
+
+后续实验不再设计 F0-F4 baseline / 消融数据集，也不再写 baseline 对比。实验只报告 HCG 图嵌入分类流程和分类效果。
+
+### 阶段一：HCG 图嵌入特征提取
+
+1. 使用 TuGraph 中已导入的 HCG 图作为输入，不从原始 CSV 或本地 `communicates.csv` 重新建图。
+2. Python 存储过程在数据库内遍历 `Endpoint` 顶点和 `COMMUNICATES` 有向边。
+3. 边权读取 `COMMUNICATES.flow_count`，采样权重使用 `log1p(flow_count)`。
+4. 使用 node2vec `p=1,q=1` 在数据库内生成 random walks。
+5. 使用 Word2Vec / skip-gram 训练 Endpoint embedding。
+6. 输出 `data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet`。
+7. 检查 embedding 行数、维度、NaN/Inf、OOV 和 nearest neighbors。
+
+当前正在执行的 TuGraph batch procedure 与阶段一目标只部分一致：它使用 HCG 有向图并以 `p=1,q=1` 生成 endpoint walks，但当前 procedure 仍是均匀邻居采样，没有读取 `COMMUNICATES.flow_count` 并按 `log1p(flow_count)` 做加权采样。正式阶段一应继续使用数据库内 Python 存储过程，不恢复 C++ 方案。
+
+### 阶段二：Flow 分类任务
+
+1. 读取 `data/processed/tcg/flows.csv`。
+2. 读取 `data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet`。
+3. 对每条 Flow 获取 `src_emb` 和 `dst_emb`。
+4. 构造 Flow 图嵌入特征：`src_emb`, `dst_emb`, `abs(src_emb - dst_emb)`, `src_emb * dst_emb`。
+5. 分类目标优先使用 `protocol_name`；如果不适合，则使用 `l7_protocol`。
+6. 如果 `label` 全为 `BENIGN`，不做异常检测分类。
+7. 训练 `DecisionTree`、`HistGradientBoosting` 或 `LightGBM`、`LogisticRegression`。
+8. KNN 只做抽样实验。
+9. 输出 Accuracy、Macro-F1、Weighted-F1、per-class F1 和 confusion matrix。
+
+分类输入只使用 HCG node2vec 生成的 Endpoint embedding 组合特征。如果分类目标是 `protocol_name`，不得使用 `protocol_name`、`l7_protocol`、`protocol_name_set`、`major_protocol_name`、`l7_protocol_entropy` 等直接或间接泄漏标签的字段。
+
+### 后续脚本规划
+
+- `scripts/run_hcg_node2vec_procedure_batch.py`：上传/调用数据库内 Python 存储过程，按 `log1p(flow_count)` 生成 HCG weighted walks。
+- `scripts/train_hcg_endpoint_node2vec.py`：读取 walks 文件和 id map，训练并检查 `hcg_endpoint_node2vec_d64.parquet`。
+- `scripts/run_flow_embedding_classification.py`：读取 `flows.csv` 和 endpoint embedding，构造四组组合特征，训练分类器并输出指标与混淆矩阵。
+- 不再生成 `F0`、`F1`、`F2`、`F3`、`F4` 数据集。
+- 不再实现 baseline 对比或消融实验脚本。
+
+## Python word2vec 训练命令模板
 
 ```bash
 PYTHONPATH=src python3 scripts/train_word2vec_embeddings.py \
@@ -224,6 +262,6 @@ PYTHONPATH=src python3 scripts/train_word2vec_embeddings.py \
 5. 如果想提高覆盖率，可以尝试 `directed=false`。
 6. 如果文件过大，可以把 `use_endpoint_id_token=false`，改用 vid token，并使用 id map 映射回 `endpoint_id`。
 7. 如果 C++ v2 过慢，先使用 v1 作为第一版 HCG embedding。
-8. v1 的结果可作为 DeepWalk / node2vec `p=1,q=1` 的基线。
-9. v2 才是严格 node2vec 二阶游走版本。
-10. 后续分类实验应比较 F0、F3、F4，验证 HCG embedding 是否提升 `protocol_name` 或 `l7_protocol` 分类效果。
+8. 后续正式阶段一以 TuGraph 中已导入的 HCG 图为输入，并在 Python 存储过程中读取 `COMMUNICATES.flow_count`，使用 `log1p(flow_count)` 作为采样权重。
+9. 当前 TuGraph Python procedure 适合验证 walk 生成链路；正式产物需要在 Python procedure 中补齐加权采样后重新生成。
+10. 后续分类实验只报告 HCG 图嵌入分类流程和分类效果，不再生成 F 系列数据集或消融对比。

@@ -108,7 +108,7 @@ extern "C" LGAPI bool Process(GraphDB& db,
 
 ## 4. WebUI 上传编译可能需要的源码格式
 
-当前仅建议通过 TuGraph WebUI 新建 C++ weighted baseline 存储过程：
+当前仅建议通过 TuGraph WebUI 新建 C++ weighted random walk 存储过程：
 
 - `procedures/hcg_weighted_walk_v1.cpp`
 
