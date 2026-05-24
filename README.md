@@ -352,7 +352,94 @@ tmp_free_after_clean=75.5GiB min_required=98.4GiB
 PYTHONPATH=src python3 scripts/import_tugraph_native.py --graph-type tcg --force
 ```
 
-## 6. 查询视图
+## 6. HCG Node2Vec Walks
+
+当前可用方案是 Python 存储过程在 TuGraph 数据库侧生成 walks，本地只负责上传/调用存储过程、检查 walks，并在后续执行 walk2vec/Word2Vec 训练。
+
+不可用方案已归档：
+
+```text
+procedures/archived_node2vec/hcg_node2vec_walk_v2_unusable.cpp
+```
+
+该 C++ node2vec 版本能编译并可能写出部分 walks，但在当前 TuGraph 4.5.2 runtime 中调用返回/清理阶段会导致服务或插件 runner 崩溃。因此默认构建脚本不再生成 `hcg_node2vec_walk_v2.so`，不要上传或执行该 C++ 版本。
+
+### 6.1 Python 存储过程 Smoke
+
+上传并执行小规模 smoke：
+
+```bash
+cd /home/marktom/tugraph/tugraph_homework_submission_03
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure.py \
+  --upload \
+  --delete-first \
+  --call \
+  --max-start-nodes 1000 \
+  --walk-length 10 \
+  --num-walks 2 \
+  --output-path /tmp/hcg_walks_node2vec_py_smoke_1000.txt \
+  --id-map-path /tmp/hcg_node_id_map_node2vec_py_smoke_1000.csv \
+  --timeout 600
+```
+
+检查 walks 文件：
+
+```bash
+python3 scripts/check_walks_file.py \
+  --walks docker/tugraph-tmp/hcg_walks_node2vec_py_smoke_1000.txt \
+  --expected-min-lines 2000 \
+  --min-walk-len 2 \
+  --report data/features/hcg/reports/hcg_node2vec_py_procedure_smoke_1000_check.md \
+  --json-report data/features/hcg/reports/hcg_node2vec_py_procedure_smoke_1000_check.json
+```
+
+当前 smoke 结果：
+
+| 指标 | 值 |
+| --- | ---: |
+| start nodes | 1,000 |
+| walks | 2,000 |
+| procedure elapsed | 15.01 秒 |
+| average walk length | 7.499 |
+| min / max walk length | 2 / 10 |
+| unique token count | 7,845 |
+| checks | PASS |
+
+### 6.2 全量执行评估
+
+HCG 当前有 `865,950` 个有出边 Endpoint。若使用 `num_walks=5`，全量需要生成约 `4,329,750` 条 walk。
+
+根据 1000 起点 smoke 的吞吐：
+
+```text
+2000 walks / 15.01s = 约 133 walks/s
+```
+
+全量 `walk_length=10,num_walks=5` 估算约 `9.0` 小时；若提高到 `walk_length=20`，保守估计约 `10-18` 小时，并会长时间占用 TuGraph Python plugin runner 和持续写 `/tmp` 输出文件。因此目前**不自动启动全量 node2vec walks**。全量执行前应先确认机器可持续运行窗口、磁盘空间和是否接受 TuGraph 插件长任务占用。
+
+确认要跑全量时使用：
+
+```bash
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure.py \
+  --call \
+  --max-start-nodes 0 \
+  --walk-length 20 \
+  --num-walks 5 \
+  --p 1.0 \
+  --q 1.0 \
+  --output-path /tmp/hcg_walks_node2vec_py_full.txt \
+  --id-map-path /tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --timeout 86400
+```
+
+生成完成后，本地 walk2vec/Word2Vec 训练应读取：
+
+```text
+docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt
+docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
+```
+
+## 7. 查询视图
 
 查询视图从 TCG 的 `causes_full_parts` 派生，用于按 `delta_seconds`、关系类型和前驱/后继数量生成子图：
 
@@ -371,7 +458,7 @@ PYTHONPATH=src python3 scripts/query_tcg_by_delta.py \
 data/processed/tcg/query_views/causes_delta_5s.parquet.report.md
 ```
 
-## 7. 校验重点
+## 8. 校验重点
 
 - `flows.csv` 中的 `record_id` 必须唯一。
 - `flow_id` 只作为普通属性，不作为 Flow 主键。

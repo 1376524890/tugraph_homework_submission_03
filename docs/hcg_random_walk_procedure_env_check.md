@@ -2,6 +2,8 @@
 
 检查日期：2026-05-24
 
+> 状态更新：本文保留 C++ 环境排查过程。后续实测确认 `hcg_node2vec_walk_v2` C++ 版本在当前 TuGraph 4.5.2 runtime 中调用会崩溃，已归档到 `procedures/archived_node2vec/hcg_node2vec_walk_v2_unusable.cpp`。当前 node2vec walk 生成使用 Python 存储过程 `procedures/hcg_node2vec_walk_py.py`。
+
 ## 结论
 
 当前作业仓库没有发现可直接复用的 TuGraph C++ 存储过程示例。进一步全盘检查发现本机存在 TuGraph 源码树 `/home/marktom/tugraph/tugraph-db/`，其中包含官方 C++ procedure 示例、`lgraph/lgraph.h` 和 `tools/json.hpp`。本次交付的 C++ 源码使用条件 include：如果 WebUI 编译环境可见 `tools/json.hpp`，优先用 `nlohmann::json` 解析参数；否则退回单文件内置的最小 JSON 参数解析器。入口使用 TuGraph v1 C++ 插件入口：
@@ -20,7 +22,7 @@ extern "C" LGAPI bool Process(GraphDB& db,
 后续在 `tugraph-db` 容器中复查 WebUI 编译错误，确认容器 `/usr/local/include/lgraph/lgraph.h` 会引入 `/usr/local/include/tools/lgraph_log.h`，而容器内不存在 Boost 头。由于容器可能无法连接外网，已增加本地 `.so` 编译脚本 `scripts/build_hcg_cpp_plugins_in_docker.sh`，使用编译期 stub 生成可上传的 `.so`：
 
 - `build/tugraph_cpp_plugins/hcg_weighted_walk_v1.so`
-- `build/tugraph_cpp_plugins/hcg_node2vec_walk_v2.so`
+- `hcg_node2vec_walk_v2.so` 已不再生成；对应 C++ 源码已归档为不可用
 
 容器内 TuGraph 头还使用了 `std::optional` 和 `std::any`，因此 `.so` 编译使用 `-std=c++17`。
 
@@ -106,18 +108,19 @@ extern "C" LGAPI bool Process(GraphDB& db,
 
 ## 4. WebUI 上传编译可能需要的源码格式
 
-推荐通过 TuGraph WebUI 新建 C++ 存储过程，分别上传以下单文件源码：
+当前仅建议通过 TuGraph WebUI 新建 C++ weighted baseline 存储过程：
 
 - `procedures/hcg_weighted_walk_v1.cpp`
-- `procedures/hcg_node2vec_walk_v2.cpp`
 
 建议设置：
 
-- procedure name: `hcg_weighted_walk_v1` 或 `hcg_node2vec_walk_v2`
+- procedure name: `hcg_weighted_walk_v1`
 - graph/subgraph: `hcg`
 - mode: read-only
 - request: JSON 字符串
 - response: JSON 字符串
+
+不要上传已归档的 C++ node2vec v2。node2vec 二阶 walks 使用 `procedures/hcg_node2vec_walk_py.py`。
 
 当前源码不依赖项目内自定义头文件，不依赖 OpenMP，不依赖 boost/rapidjson。
 
@@ -134,7 +137,7 @@ extern "C" LGAPI bool Process(GraphDB& db,
 ## 7. 推荐上传到 WebUI 的源码文件名
 
 - first-order weighted random walk: `hcg_weighted_walk_v1.cpp`
-- second-order node2vec random walk: `hcg_node2vec_walk_v2.cpp`
+- second-order node2vec random walk: use Python procedure `hcg_node2vec_walk_py.py`
 
 ## 需要注意
 

@@ -21,6 +21,7 @@ using json = nlohmann::json;
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <memory>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -342,6 +343,115 @@ GraphData LoadGraph(GraphDB& db, const Params& params) {
     return data;
 }
 
+std::string GetVertexToken(lgraph_api::VertexIterator& vit, const Params& params,
+                           GraphData* data, bool* warned_endpoint_id) {
+    int64_t vid = vit.GetId();
+    auto token_it = data->tokens.find(vid);
+    if (token_it != data->tokens.end()) return token_it->second;
+
+    std::string token = VidToken(vid);
+    if (params.use_endpoint_id_token) {
+        try {
+            token = vit.GetField(kEndpointIdFieldId).AsString();
+            if (token.empty()) token = VidToken(vid);
+        } catch (...) {
+            if (!*warned_endpoint_id) {
+                data->warnings.push_back("endpoint_id is unavailable for at least one Endpoint; vid token is used as fallback.");
+                *warned_endpoint_id = true;
+            }
+        }
+    }
+    data->tokens[vid] = token;
+    return token;
+}
+
+void LoadNeighborsForVertex(Transaction& txn, int64_t vid, const Params& params, GraphData* data,
+                            bool* warned_weight, bool* warned_endpoint_id) {
+    if (data->adj.find(vid) != data->adj.end()) return;
+
+    std::vector<Neighbor> neighbors;
+    auto vit = txn.GetVertexIterator(vid);
+    if (!vit.IsValid()) {
+        data->adj[vid] = neighbors;
+        return;
+    }
+    GetVertexToken(vit, params, data, warned_endpoint_id);
+
+    size_t weight_field_id = WeightFieldId(params);
+    for (auto eit = vit.GetOutEdgeIterator(); eit.IsValid(); eit.Next()) {
+        int64_t dst = eit.GetDst();
+        double raw = 1.0;
+        if (params.weighted) {
+            try {
+                bool ok = false;
+                raw = FieldToDouble(eit.GetField(weight_field_id), &ok);
+                if (!ok && !*warned_weight) {
+                    data->warnings.push_back("weight field is unavailable or non-numeric for at least one edge; fallback weight 1.0 is used.");
+                    *warned_weight = true;
+                }
+            } catch (...) {
+                if (!*warned_weight) {
+                    data->warnings.push_back("weight field is unavailable or non-numeric for at least one edge; fallback weight 1.0 is used.");
+                    *warned_weight = true;
+                }
+                raw = 1.0;
+            }
+        }
+        neighbors.push_back(Neighbor{dst, TransformWeight(raw, params), 0.0});
+        ++data->edge_count;
+    }
+    if (!params.directed) {
+        for (auto eit = vit.GetInEdgeIterator(); eit.IsValid(); eit.Next()) {
+            int64_t src = eit.GetSrc();
+            double raw = 1.0;
+            if (params.weighted) {
+                try {
+                    bool ok = false;
+                    raw = FieldToDouble(eit.GetField(weight_field_id), &ok);
+                    if (!ok && !*warned_weight) {
+                        data->warnings.push_back("weight field is unavailable or non-numeric for at least one edge; fallback weight 1.0 is used.");
+                        *warned_weight = true;
+                    }
+                } catch (...) {
+                    if (!*warned_weight) {
+                        data->warnings.push_back("weight field is unavailable or non-numeric for at least one edge; fallback weight 1.0 is used.");
+                        *warned_weight = true;
+                    }
+                    raw = 1.0;
+                }
+            }
+            neighbors.push_back(Neighbor{src, TransformWeight(raw, params), 0.0});
+            ++data->edge_count;
+        }
+    }
+
+    double cumulative = 0.0;
+    for (auto& nb : neighbors) {
+        cumulative += nb.weight;
+        nb.cumulative = cumulative;
+    }
+    data->adj[vid] = neighbors;
+}
+
+GraphData LoadStartNodesOnly(GraphDB& db, const Params& params) {
+    GraphData data;
+    auto txn = db.CreateReadTxn();
+    bool warned_endpoint_id = false;
+    for (auto vit = txn.GetVertexIterator(); vit.IsValid(); vit.Next()) {
+        int64_t vid = vit.GetId();
+        data.start_nodes.push_back(vid);
+        GetVertexToken(vit, params, &data, &warned_endpoint_id);
+        if (params.max_start_nodes > 0 &&
+            static_cast<int64_t>(data.start_nodes.size()) >= params.max_start_nodes) {
+            break;
+        }
+    }
+    data.node_count = data.tokens.size();
+    data.warnings.push_back("limited mode is enabled; node_count and edge_count report only vertices/edges touched by sampled walks.");
+    txn.Abort();
+    return data;
+}
+
 int64_t SampleFirstOrder(const std::vector<Neighbor>& neighbors, std::mt19937_64* rng) {
     if (neighbors.empty()) return -1;
     double total = neighbors.back().cumulative;
@@ -416,7 +526,8 @@ extern "C" LGAPI bool Process(GraphDB& db, const std::string& request, std::stri
     auto start_time = std::chrono::steady_clock::now();
     try {
         Params params = ParseParams(request);
-        GraphData data = LoadGraph(db, params);
+        bool limited_mode = params.max_start_nodes > 0;
+        GraphData data = limited_mode ? LoadStartNodesOnly(db, params) : LoadGraph(db, params);
 
         std::ofstream walks_out(params.output_path.c_str());
         if (!walks_out) {
@@ -424,17 +535,24 @@ extern "C" LGAPI bool Process(GraphDB& db, const std::string& request, std::stri
                                      "Create the parent directory inside the TuGraph server/container and grant write permission.");
             return true;
         }
-        WriteIdMap(params.id_map_path, data.tokens);
 
         std::mt19937_64 rng(params.seed);
         std::vector<std::string> preview;
         size_t walk_count = 0;
+        bool warned_weight = false;
+        bool warned_endpoint_id = false;
+        std::unique_ptr<Transaction> lazy_txn;
+        if (limited_mode) lazy_txn.reset(new Transaction(db.CreateReadTxn()));
         for (int round = 0; round < params.num_walks; ++round) {
             for (int64_t start : data.start_nodes) {
                 std::vector<int64_t> walk;
                 walk.reserve(static_cast<size_t>(params.walk_length));
                 walk.push_back(start);
                 while (static_cast<int>(walk.size()) < params.walk_length) {
+                    if (limited_mode) {
+                        LoadNeighborsForVertex(*lazy_txn, walk.back(), params, &data,
+                                               &warned_weight, &warned_endpoint_id);
+                    }
                     auto it = data.adj.find(walk.back());
                     if (it == data.adj.end() || it->second.empty()) break;
                     int64_t next = SampleFirstOrder(it->second, &rng);
@@ -447,6 +565,11 @@ extern "C" LGAPI bool Process(GraphDB& db, const std::string& request, std::stri
                 ++walk_count;
             }
         }
+        if (limited_mode) {
+            data.node_count = data.tokens.size();
+            lazy_txn->Abort();
+        }
+        WriteIdMap(params.id_map_path, data.tokens);
         walks_out.close();
         if (!walks_out) {
             response = ErrorResponse("failed while writing output_path: " + params.output_path,

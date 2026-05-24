@@ -1,3 +1,10 @@
+// ARCHIVED / DO NOT UPLOAD.
+//
+// This C++ node2vec stored procedure can compile and may write walks, but on
+// the current TuGraph 4.5.2 runtime it crashes the server/plugin runner during
+// call return or cleanup. The active node2vec walk generator is the Python
+// stored procedure at procedures/hcg_node2vec_walk_py.py.
+
 #include "lgraph/lgraph.h"
 
 #ifndef __has_include
@@ -21,6 +28,7 @@ using json = nlohmann::json;
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <memory>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -53,6 +61,7 @@ struct Params {
     bool directed = true;
     uint64_t seed = 20260524;
     int64_t max_start_nodes = 10000;
+    int64_t start_vid = -1;
     bool use_endpoint_id_token = true;
     int return_preview_lines = 5;
 };
@@ -202,6 +211,7 @@ Params ParseParams(const std::string& request, std::vector<std::string>* warning
             if (input.find("output_path") != input.end()) p.output_path = input["output_path"].get<std::string>();
             if (input.find("id_map_path") != input.end()) p.id_map_path = input["id_map_path"].get<std::string>();
             if (input.find("walk_length") != input.end()) p.walk_length = input["walk_length"].get<int>();
+            if (input.find("walk_len") != input.end()) p.walk_length = input["walk_len"].get<int>();
             if (input.find("num_walks") != input.end()) p.num_walks = input["num_walks"].get<int>();
             if (input.find("p") != input.end()) p.p = input["p"].get<double>();
             if (input.find("q") != input.end()) p.q = input["q"].get<double>();
@@ -211,6 +221,7 @@ Params ParseParams(const std::string& request, std::vector<std::string>* warning
             if (input.find("directed") != input.end()) p.directed = input["directed"].get<bool>();
             if (input.find("seed") != input.end()) p.seed = input["seed"].get<uint64_t>();
             if (input.find("max_start_nodes") != input.end()) p.max_start_nodes = input["max_start_nodes"].get<int64_t>();
+            if (input.find("start_vid") != input.end()) p.start_vid = input["start_vid"].get<int64_t>();
             if (input.find("use_endpoint_id_token") != input.end()) p.use_endpoint_id_token = input["use_endpoint_id_token"].get<bool>();
             if (input.find("return_preview_lines") != input.end()) p.return_preview_lines = input["return_preview_lines"].get<int>();
         }
@@ -221,6 +232,7 @@ Params ParseParams(const std::string& request, std::vector<std::string>* warning
     ReadString(request, "output_path", &p.output_path);
     ReadString(request, "id_map_path", &p.id_map_path);
     ReadInt(request, "walk_length", &p.walk_length);
+    ReadInt(request, "walk_len", &p.walk_length);
     ReadInt(request, "num_walks", &p.num_walks);
     ReadDouble(request, "p", &p.p);
     ReadDouble(request, "q", &p.q);
@@ -230,6 +242,7 @@ Params ParseParams(const std::string& request, std::vector<std::string>* warning
     ReadBool(request, "directed", &p.directed);
     ReadUInt64(request, "seed", &p.seed);
     ReadInt64(request, "max_start_nodes", &p.max_start_nodes);
+    ReadInt64(request, "start_vid", &p.start_vid);
     ReadBool(request, "use_endpoint_id_token", &p.use_endpoint_id_token);
     ReadInt(request, "return_preview_lines", &p.return_preview_lines);
 #endif
@@ -284,6 +297,28 @@ std::string VidToken(int64_t vid) {
 void AddNeighbor(GraphData* data, int64_t src, int64_t dst, double w) {
     data->adj[src].push_back(Neighbor{dst, w, 0.0});
     data->neighbor_set[src].insert(dst);
+}
+
+std::string GetVertexToken(lgraph_api::VertexIterator& vit, const Params& params,
+                           GraphData* data, bool* warned_endpoint_id) {
+    int64_t vid = vit.GetId();
+    auto token_it = data->tokens.find(vid);
+    if (token_it != data->tokens.end()) return token_it->second;
+
+    std::string token = VidToken(vid);
+    if (params.use_endpoint_id_token) {
+        try {
+            token = vit.GetField(kEndpointIdFieldId).AsString();
+            if (token.empty()) token = VidToken(vid);
+        } catch (...) {
+            if (!*warned_endpoint_id) {
+                data->warnings.push_back("endpoint_id is unavailable for at least one Endpoint; vid token is used as fallback.");
+                *warned_endpoint_id = true;
+            }
+        }
+    }
+    data->tokens[vid] = token;
+    return token;
 }
 
 GraphData LoadGraph(GraphDB& db, const Params& params, const std::vector<std::string>& initial_warnings) {
@@ -353,6 +388,102 @@ GraphData LoadGraph(GraphDB& db, const Params& params, const std::vector<std::st
             nb.cumulative = cumulative;
         }
     }
+    txn.Abort();
+    return data;
+}
+
+void LoadNeighborsForVertex(Transaction& txn, int64_t vid, const Params& params, GraphData* data,
+                            bool* warned_weight, bool* warned_endpoint_id) {
+    if (data->adj.find(vid) != data->adj.end()) return;
+
+    std::vector<Neighbor> neighbors;
+    auto vit = txn.GetVertexIterator(vid);
+    if (!vit.IsValid()) {
+        data->adj[vid] = neighbors;
+        return;
+    }
+    GetVertexToken(vit, params, data, warned_endpoint_id);
+
+    size_t weight_field_id = WeightFieldId(params);
+    for (auto eit = vit.GetOutEdgeIterator(); eit.IsValid(); eit.Next()) {
+        int64_t dst = eit.GetDst();
+        double raw = 1.0;
+        if (params.weighted) {
+            try {
+                bool ok = false;
+                raw = FieldToDouble(eit.GetField(weight_field_id), &ok);
+                if (!ok && !*warned_weight) {
+                    data->warnings.push_back("weight field is unavailable or non-numeric for at least one edge; fallback weight 1.0 is used.");
+                    *warned_weight = true;
+                }
+            } catch (...) {
+                if (!*warned_weight) {
+                    data->warnings.push_back("weight field is unavailable or non-numeric for at least one edge; fallback weight 1.0 is used.");
+                    *warned_weight = true;
+                }
+                raw = 1.0;
+            }
+        }
+        AddNeighbor(data, vid, dst, TransformWeight(raw, params));
+        ++data->edge_count;
+    }
+    if (!params.directed) {
+        for (auto eit = vit.GetInEdgeIterator(); eit.IsValid(); eit.Next()) {
+            int64_t src = eit.GetSrc();
+            double raw = 1.0;
+            if (params.weighted) {
+                try {
+                    bool ok = false;
+                    raw = FieldToDouble(eit.GetField(weight_field_id), &ok);
+                    if (!ok && !*warned_weight) {
+                        data->warnings.push_back("weight field is unavailable or non-numeric for at least one edge; fallback weight 1.0 is used.");
+                        *warned_weight = true;
+                    }
+                } catch (...) {
+                    if (!*warned_weight) {
+                        data->warnings.push_back("weight field is unavailable or non-numeric for at least one edge; fallback weight 1.0 is used.");
+                        *warned_weight = true;
+                    }
+                    raw = 1.0;
+                }
+            }
+            AddNeighbor(data, vid, src, TransformWeight(raw, params));
+            ++data->edge_count;
+        }
+    }
+
+    double cumulative = 0.0;
+    for (auto& nb : data->adj[vid]) {
+        cumulative += nb.weight;
+        nb.cumulative = cumulative;
+    }
+}
+
+GraphData LoadStartNodesOnly(GraphDB& db, const Params& params, const std::vector<std::string>& initial_warnings) {
+    GraphData data;
+    data.warnings = initial_warnings;
+    auto txn = db.CreateReadTxn();
+    bool warned_endpoint_id = false;
+
+    if (params.start_vid >= 0) {
+        auto vit = txn.GetVertexIterator(params.start_vid);
+        if (!vit.IsValid()) throw std::runtime_error("start_vid does not exist: " + VidToken(params.start_vid));
+        data.start_nodes.push_back(params.start_vid);
+        GetVertexToken(vit, params, &data, &warned_endpoint_id);
+    } else {
+        for (auto vit = txn.GetVertexIterator(); vit.IsValid(); vit.Next()) {
+            int64_t vid = vit.GetId();
+            data.start_nodes.push_back(vid);
+            GetVertexToken(vit, params, &data, &warned_endpoint_id);
+            if (params.max_start_nodes > 0 &&
+                static_cast<int64_t>(data.start_nodes.size()) >= params.max_start_nodes) {
+                break;
+            }
+        }
+    }
+
+    data.node_count = data.tokens.size();
+    data.warnings.push_back("limited mode is enabled; node_count and edge_count report only vertices/edges touched by sampled walks.");
     txn.Abort();
     return data;
 }
@@ -468,7 +599,8 @@ extern "C" LGAPI bool Process(GraphDB& db, const std::string& request, std::stri
     try {
         std::vector<std::string> warnings;
         Params params = ParseParams(request, &warnings);
-        GraphData data = LoadGraph(db, params, warnings);
+        bool limited_mode = params.start_vid >= 0 || params.max_start_nodes > 0;
+        GraphData data = limited_mode ? LoadStartNodesOnly(db, params, warnings) : LoadGraph(db, params, warnings);
 
         std::ofstream walks_out(params.output_path.c_str());
         if (!walks_out) {
@@ -476,11 +608,14 @@ extern "C" LGAPI bool Process(GraphDB& db, const std::string& request, std::stri
                                      "Create the parent directory inside the TuGraph server/container and grant write permission.");
             return true;
         }
-        WriteIdMap(params.id_map_path, data.tokens);
 
         std::mt19937_64 rng(params.seed);
         std::vector<std::string> preview;
         size_t walk_count = 0;
+        bool warned_weight = false;
+        bool warned_endpoint_id = false;
+        std::unique_ptr<Transaction> lazy_txn;
+        if (limited_mode) lazy_txn.reset(new Transaction(db.CreateReadTxn()));
         for (int round = 0; round < params.num_walks; ++round) {
             for (int64_t start : data.start_nodes) {
                 std::vector<int64_t> walk;
@@ -488,6 +623,10 @@ extern "C" LGAPI bool Process(GraphDB& db, const std::string& request, std::stri
                 walk.push_back(start);
                 while (static_cast<int>(walk.size()) < params.walk_length) {
                     int64_t cur = walk.back();
+                    if (limited_mode) {
+                        LoadNeighborsForVertex(*lazy_txn, cur, params, &data,
+                                               &warned_weight, &warned_endpoint_id);
+                    }
                     auto it = data.adj.find(cur);
                     if (it == data.adj.end() || it->second.empty()) break;
                     int64_t next = -1;
@@ -506,6 +645,11 @@ extern "C" LGAPI bool Process(GraphDB& db, const std::string& request, std::stri
                 ++walk_count;
             }
         }
+        if (limited_mode) {
+            data.node_count = data.tokens.size();
+            lazy_txn->Abort();
+        }
+        WriteIdMap(params.id_map_path, data.tokens);
         walks_out.close();
         if (!walks_out) {
             response = ErrorResponse("failed while writing output_path: " + params.output_path,

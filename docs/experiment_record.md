@@ -834,3 +834,189 @@ bash scripts/build_hcg_cpp_plugins_in_docker.sh
 3. 如果后续容器可安装 `boost-devel`，可以回到 WebUI 直接上传源码编译。
 4. v1 是 DeepWalk / node2vec `p=1,q=1` 基线；v2 才是严格 node2vec 二阶游走。
 5. 全量 HCG 约有近百万 Endpoint，`walk_length=20,num_walks=5` 时输出 token 可能接近上亿级，必须先做小规模验证。
+
+## 2026-05-24 HCG Node2Vec C++ 归档与 Python 存储过程 Smoke
+
+根据作业 2 中可跑通的 Python node2vec 逻辑，重新检查 HCG node2vec walk 生成方案。结论如下：
+
+1. `hcg_node2vec_walk_v2.cpp` C++ 版本不可作为当前可用方案。
+2. 全量 walks 仍应在 TuGraph 数据库侧生成，避免本地 Bolt 逐点查询。
+3. 当前可用实现改为 Python 存储过程：`procedures/hcg_node2vec_walk_py.py`。
+
+### C++ node2vec 归档
+
+已将不可用 C++ 版本移动到：
+
+```text
+procedures/archived_node2vec/hcg_node2vec_walk_v2_unusable.cpp
+```
+
+归档原因：
+
+- C++ v2 可编译。
+- 调用时可以写出 walks 文件。
+- 但在当前 TuGraph 4.5.2 runtime 中，调用返回或清理阶段会导致 TuGraph 服务或 plugin runner 崩溃。
+- 重新按官方风格增加 `-fno-gnu-unique`、`-rdynamic`、`-fopenmp` 并链接 `/usr/local/lib64/lgraph/liblgraph.so` 后仍复现崩溃。
+
+处理结果：
+
+- 不再上传或执行 `hcg_node2vec_walk_v2` C++ 插件。
+- 已从 TuGraph 中删除该 C++ 插件，当前插件列表只保留 `hcg_weighted_walk_v1`。
+- 默认 C++ 构建脚本不再生成 `hcg_node2vec_walk_v2.so`，避免误上传。
+- 归档目录新增 `procedures/archived_node2vec/README.md` 标注风险。
+
+### Python 存储过程实现
+
+新增：
+
+| 文件 | 说明 |
+| --- | --- |
+| `procedures/hcg_node2vec_walk_py.py` | TuGraph Python 存储过程，在数据库侧生成 HCG node2vec walks |
+| `scripts/run_hcg_node2vec_procedure.py` | 本地上传/调用 Python 存储过程 |
+
+存储过程参数：
+
+- `output_path`
+- `id_map_path`
+- `walk_length` / `walk_len`
+- `num_walks`
+- `p`
+- `q`
+- `seed`
+- `max_start_nodes`
+- `start_vid`
+- `only_start_nodes_with_out_edges`
+- `return_preview_lines`
+
+### Smoke 1：100 起点
+
+命令：
+
+```bash
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure.py \
+  --upload \
+  --delete-first \
+  --call \
+  --max-start-nodes 100 \
+  --walk-length 10 \
+  --num-walks 2 \
+  --output-path /tmp/hcg_walks_node2vec_py_smoke.txt \
+  --id-map-path /tmp/hcg_node_id_map_node2vec_py_smoke.csv \
+  --timeout 600
+```
+
+结果：
+
+| 指标 | 值 |
+| --- | ---: |
+| start_node_count | 100 |
+| walk_count | 200 |
+| walk_length | 10 |
+| num_walks | 2 |
+| touched_node_count | 928 |
+| cached_neighbor_count | 893 |
+| procedure elapsed | 1.7348 秒 |
+| client elapsed | 1.7658 秒 |
+
+检查报告：
+
+```text
+data/features/hcg/reports/hcg_node2vec_py_procedure_smoke_check.md
+```
+
+检查结果：PASS。
+
+### Smoke 2：1000 起点
+
+命令：
+
+```bash
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure.py \
+  --call \
+  --max-start-nodes 1000 \
+  --walk-length 10 \
+  --num-walks 2 \
+  --output-path /tmp/hcg_walks_node2vec_py_smoke_1000.txt \
+  --id-map-path /tmp/hcg_node_id_map_node2vec_py_smoke_1000.csv \
+  --timeout 600
+```
+
+结果：
+
+| 指标 | 值 |
+| --- | ---: |
+| start_node_count | 1,000 |
+| walk_count | 2,000 |
+| walk_length | 10 |
+| num_walks | 2 |
+| touched_node_count | 7,845 |
+| cached_neighbor_count | 7,673 |
+| procedure elapsed | 15.0082 秒 |
+| client elapsed | 15.0319 秒 |
+
+检查报告：
+
+```text
+data/features/hcg/reports/hcg_node2vec_py_procedure_smoke_1000_check.md
+```
+
+检查结果：
+
+| 指标 | 值 |
+| --- | ---: |
+| line_count | 2,000 |
+| average_walk_length | 7.499 |
+| min_walk_length | 2 |
+| max_walk_length | 10 |
+| unique_token_count | 7,845 |
+| empty_line_count | 0 |
+| checks | PASS |
+
+### 全量性能估算与决策
+
+从 HCG CSV 统计：
+
+| 指标 | 值 |
+| --- | ---: |
+| COMMUNICATES 边 | 1,716,084 |
+| 有出边 Endpoint | 865,950 |
+| HCG Endpoint 总数 | 935,600 |
+
+按全量 `num_walks=5` 计算：
+
+```text
+865,950 start nodes * 5 walks = 4,329,750 walks
+```
+
+1000 起点 smoke 的吞吐为：
+
+```text
+2000 walks / 15.0082s = 约 133 walks/s
+```
+
+估算：
+
+- `walk_length=10,num_walks=5`：约 9.0 小时。
+- `walk_length=20,num_walks=5`：保守估计约 10-18 小时。
+
+由于全量执行耗时与 smoke 差异过大，并且会长时间占用 TuGraph Python plugin runner，本次**不启动全量 node2vec walks**。后续若确认接受长任务开销，再执行：
+
+```bash
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure.py \
+  --call \
+  --max-start-nodes 0 \
+  --walk-length 20 \
+  --num-walks 5 \
+  --p 1.0 \
+  --q 1.0 \
+  --output-path /tmp/hcg_walks_node2vec_py_full.txt \
+  --id-map-path /tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --timeout 86400
+```
+
+生成 walks 后，本地 walk2vec/Word2Vec 训练读取宿主机路径：
+
+```text
+docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt
+docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
+```

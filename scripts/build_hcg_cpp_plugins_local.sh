@@ -3,25 +3,26 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TUGRAPH_INCLUDE="${TUGRAPH_INCLUDE:-/home/marktom/tugraph/tugraph-db/include}"
+TUGRAPH_LIBLGRAPH="${TUGRAPH_LIBLGRAPH:-/home/marktom/tugraph/tugraph-db/build/output/liblgraph.so}"
 OUT_DIR="${ROOT_DIR}/build/tugraph_cpp_plugins_host"
 
 mkdir -p "${OUT_DIR}"
 
-g++ -std=c++17 -O2 -fPIC -shared \
+LINK_ARGS=()
+if [[ -f "${TUGRAPH_LIBLGRAPH}" ]]; then
+  LINK_ARGS+=("${TUGRAPH_LIBLGRAPH}")
+else
+  echo "Warning: ${TUGRAPH_LIBLGRAPH} not found; building host ABI-check .so without linking liblgraph.so."
+fi
+
+g++ -fno-gnu-unique -fPIC --std=c++17 -rdynamic -O3 -fopenmp -DNDEBUG -shared \
   -D_GLIBCXX_USE_CXX11_ABI=1 \
   -include optional -include any \
   -I"${ROOT_DIR}/build/tugraph_stub_include" \
   -I"${TUGRAPH_INCLUDE}" \
   "${ROOT_DIR}/procedures/hcg_weighted_walk_v1.cpp" \
+  "${LINK_ARGS[@]}" \
   -o "${OUT_DIR}/hcg_weighted_walk_v1.so"
-
-g++ -std=c++17 -O2 -fPIC -shared \
-  -D_GLIBCXX_USE_CXX11_ABI=1 \
-  -include optional -include any \
-  -I"${ROOT_DIR}/build/tugraph_stub_include" \
-  -I"${TUGRAPH_INCLUDE}" \
-  "${ROOT_DIR}/procedures/hcg_node2vec_walk_v2.cpp" \
-  -o "${OUT_DIR}/hcg_node2vec_walk_v2.so"
 
 ls -lh "${OUT_DIR}/"*.so
 

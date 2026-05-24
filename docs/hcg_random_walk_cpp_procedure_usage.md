@@ -1,6 +1,6 @@
-# HCG Random Walk C++ Procedure Usage
+# HCG Random Walk Procedure Usage
 
-本文档说明如何在 TuGraph WebUI 中上传两个只读 C++ 存储过程，在数据库服务端生成 HCG random walks 文件，后续供 Python word2vec/skip-gram 训练 Endpoint embedding。
+本文档说明 HCG random walks 的存储过程方案。当前可用 node2vec 二阶游走实现是 Python 存储过程 `procedures/hcg_node2vec_walk_py.py`。C++ node2vec v2 已归档为不可用，不要上传或执行。
 
 ## 源码文件
 
@@ -9,12 +9,16 @@
   - 等价于 DeepWalk / node2vec `p=1, q=1` 的一阶游走。
   - 支持 `weighted`、`weight_field`、`weight_transform`、`directed`、`max_start_nodes`。
 
-- `procedures/hcg_node2vec_walk_v2.cpp`
-  - node2vec second-order random walk。
-  - 支持 `p`、`q` 二阶转移偏置。
-  - 第一跳按基础边权采样，后续按 `base_weight(cur,x) * alpha(prev,x)` 采样。
+- `procedures/archived_node2vec/hcg_node2vec_walk_v2_unusable.cpp`
+  - 已归档，不可用。
+  - 当前 TuGraph 4.5.2 runtime 中调用会导致服务或 plugin runner 崩溃。
 
-两个过程都只读 HCG 图，不修改数据库数据，只写服务端或容器内 walks 文件和 id map 文件。
+- `procedures/hcg_node2vec_walk_py.py`
+  - 当前可用 node2vec second-order random walk。
+  - 通过 Python 存储过程在 TuGraph 数据库侧生成 walks。
+  - 支持 `p`、`q` 二阶转移偏置。
+
+当前可用过程都只读 HCG 图，不修改数据库数据，只写服务端或容器内 walks 文件和 id map 文件。
 
 ## WebUI 上传编译步骤
 
@@ -29,7 +33,28 @@
 9. 输入 JSON 参数进行 smoke test。
 10. 查看 response JSON。
 11. 检查 `output_path` 是否生成 walks 文件。
-12. 再上传 `procedures/hcg_node2vec_walk_v2.cpp`，设置名称 `hcg_node2vec_walk_v2`，重复上述步骤。
+12. 不要上传已归档的 `procedures/archived_node2vec/hcg_node2vec_walk_v2_unusable.cpp`。
+
+## Python node2vec 存储过程
+
+上传并执行 smoke：
+
+```bash
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure.py \
+  --upload \
+  --delete-first \
+  --call \
+  --max-start-nodes 1000 \
+  --walk-length 10 \
+  --num-walks 2 \
+  --output-path /tmp/hcg_walks_node2vec_py_smoke_1000.txt \
+  --id-map-path /tmp/hcg_node_id_map_node2vec_py_smoke_1000.csv \
+  --timeout 600
+```
+
+当前 1000 起点 smoke：`2000` 条 walks，过程耗时 `15.0082` 秒，检查报告为 `data/features/hcg/reports/hcg_node2vec_py_procedure_smoke_1000_check.md`。
+
+全量估算：HCG 有 `865950` 个有出边 Endpoint，`num_walks=5` 时约 `4329750` 条 walks。按当前 Python 存储过程 smoke 吞吐估算，`walk_length=20,num_walks=5` 约需 `10-18` 小时，因此未自动执行全量。
 
 如果 WebUI 编译要求与本地源码不同，优先按编译报错调整：
 
@@ -56,7 +81,6 @@ bash scripts/build_hcg_cpp_plugins_in_docker.sh
 
 ```text
 build/tugraph_cpp_plugins/hcg_weighted_walk_v1.so
-build/tugraph_cpp_plugins/hcg_node2vec_walk_v2.so
 ```
 
 这套编译方式只在编译期用 stub 绕过 TuGraph 头文件中的 Boost Log/Geometry include，不改变 TuGraph 数据库数据，也不修改正在运行的 TuGraph 服务。容器里的 TuGraph 头使用了 `std::optional` 和 `std::any`，因此本地 `.so` 编译参数使用 `-std=c++17`。
@@ -71,17 +95,15 @@ bash scripts/build_hcg_cpp_plugins_local.sh
 
 ```text
 build/tugraph_cpp_plugins_host/hcg_weighted_walk_v1.so
-build/tugraph_cpp_plugins_host/hcg_node2vec_walk_v2.so
 ```
 
 但当前宿主机是 Ubuntu 24.04 / GCC 13 / glibc 2.39，本地编译出的 `.so` 会引用较新的 `GLIBC_2.38`、`GLIBCXX_3.4.32` 等符号。当前 TuGraph 容器是 CentOS 7，运行时大概率没有这些符号，因此**不推荐把宿主机直接编译产物上传到当前 WebUI**。当前推荐上传的是容器内编译产物：
 
 ```text
 build/tugraph_cpp_plugins/hcg_weighted_walk_v1.so
-build/tugraph_cpp_plugins/hcg_node2vec_walk_v2.so
 ```
 
-实际实验中不使用 `build/tugraph_cpp_plugins_host/` 下的宿主机编译版本；该目录只保留用于 ABI 风险验证。后续源码变更后，统一重新执行 `bash scripts/build_hcg_cpp_plugins_in_docker.sh`，再上传 `build/tugraph_cpp_plugins/` 下的容器编译版本。
+实际实验中不使用 `build/tugraph_cpp_plugins_host/` 下的宿主机编译版本；该目录只保留用于 ABI 风险验证。后续 C++ v1 源码变更后，统一重新执行 `bash scripts/build_hcg_cpp_plugins_in_docker.sh`，再上传 `build/tugraph_cpp_plugins/` 下的容器编译版本。
 
 ## v1 Smoke Test 参数
 
@@ -102,26 +124,9 @@ build/tugraph_cpp_plugins/hcg_node2vec_walk_v2.so
 }
 ```
 
-## v2 Node2Vec Smoke Test 参数
+## 已归档 C++ v2 Node2Vec 参数
 
-```json
-{
-  "output_path": "/tmp/hcg_walks_v2_smoke.txt",
-  "id_map_path": "/tmp/hcg_node_id_map_v2_smoke.csv",
-  "walk_length": 10,
-  "num_walks": 2,
-  "p": 1.0,
-  "q": 1.0,
-  "weighted": true,
-  "weight_field": "flow_count",
-  "weight_transform": "log1p",
-  "directed": true,
-  "seed": 20260524,
-  "max_start_nodes": 1000,
-  "use_endpoint_id_token": true,
-  "return_preview_lines": 5
-}
-```
+C++ v2 node2vec 已归档为不可用，不再提供 smoke 参数。请使用上面的 Python node2vec 存储过程命令。
 
 ## 小规模正式参数
 
