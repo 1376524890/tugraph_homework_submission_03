@@ -245,7 +245,7 @@ def auth_headers(jwt: str) -> dict[str, str]:
     return {"Authorization": "Bearer " + jwt}
 
 
-def upload(args: argparse.Namespace, jwt: str) -> None:
+def upload(args: argparse.Namespace, jwt: str, log) -> None:
     url = args.http.rstrip("/") + f"/db/{args.graph}/python_plugin"
     if args.delete_first:
         delete_url = url + "/" + args.procedure_name
@@ -254,7 +254,7 @@ def upload(args: argparse.Namespace, jwt: str) -> None:
             if response.status_code not in (200, 400, 404):
                 response.raise_for_status()
         except requests_exceptions.Timeout:
-            print(f"delete_timeout_after_seconds={args.delete_timeout}; continuing with upload")
+            log(f"delete_timeout_after_seconds={args.delete_timeout}; continuing with upload")
 
     code = args.procedure_path.read_bytes()
     payload = {
@@ -268,10 +268,10 @@ def upload(args: argparse.Namespace, jwt: str) -> None:
     headers = auth_headers(jwt) | {"Content-Type": "application/json"}
     response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=300)
     if response.status_code == 400 and "already exists" in response.text:
-        print("upload_skipped=already_exists")
+        log("upload_skipped=already_exists")
         return
     response.raise_for_status()
-    print("upload=ok")
+    log("upload=ok")
 
 
 def call_batch(
@@ -362,7 +362,6 @@ def main() -> int:
     log_fh = log_path.open("a", encoding="utf-8")
 
     def log(msg: str):
-        print(msg)
         log_fh.write(msg + "\n")
         log_fh.flush()
 
@@ -393,7 +392,7 @@ def main() -> int:
 
     jwt = login(args)
     if args.upload:
-        upload(args, jwt)
+        upload(args, jwt, log)
     if not args.call:
         log("Nothing to do. Use --call to run batches.")
         return 0

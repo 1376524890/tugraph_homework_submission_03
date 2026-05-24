@@ -1038,3 +1038,55 @@ docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
 - `hcg_node2vec_walk_py_batch`
 
 批处理脚本会先统计 HCG 中有出边的起点数，再按批次调用数据库侧 procedure，最后把 walks 和 id map 分片合并为完整文件。全量运行建议从 `--batch-size 10000` 起步，不要再用 `batch-size=1` 这种会产生过多批次日志的参数。
+
+### 批处理输出与默认参数复核
+
+根据实验运行需求，调整了 `scripts/run_hcg_node2vec_procedure_batch.py` 的终端输出策略：
+
+- 终端不再打印每批详细 JSON 日志、runner 清理日志和上传状态。
+- 终端仅保留 `tqdm` 进度条，便于长时间任务观察整体进度。
+- 详细过程仍写入 `logs/node2vec_batch_*.log`，用于失败后排查。
+
+语法检查：
+
+```bash
+python -m py_compile scripts/run_hcg_node2vec_procedure_batch.py
+```
+
+当前批处理脚本默认参数如下：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `walk_length` | `20` | 每条 walk 最大长度 |
+| `num_walks` | `5` | 每个起点生成 walk 数 |
+| `p` | `1.0` | node2vec return 参数 |
+| `q` | `1.0` | node2vec in-out 参数 |
+| `start_offset` | `-1` | 自动推断续跑位置；输出为空时从 `0` 开始 |
+| `batch_size` | `1000` | 每批起点数 |
+| `max_batches` | `0` | 不限制批次数，直到覆盖全部起点 |
+| `progress` | `True` | 默认显示进度条 |
+
+起始点选择逻辑：
+
+- procedure 默认只选择有出边的顶点作为起点。
+- 起点顺序来自 TuGraph 顶点迭代器。
+- `start_offset=-1` 时，本地脚本会根据已有输出文件行数推断续跑位置：`已有 walk 行数 / num_walks`。
+- 若输出文件不存在或为空，则从 `start_offset=0` 开始。
+
+参数适配结论：
+
+- `walk_length=20,num_walks=5,p=1.0,q=1.0` 符合后续全量 node2vec / DeepWalk 基线实验配置。
+- `batch_size=1000` 可以正确运行，但全量约 `865,950 / 1000 = 866` 批，调用和清理开销偏多。
+- 文档建议全量实验显式使用 `--batch-size 10000`，约 `87` 批，更适合长任务执行。
+- 本次按要求**不修改脚本默认 batch size**，保留 `DEFAULT_BATCH_SIZE=1000`；后续全量命令通过命令行参数覆盖。
+
+推荐后续全量批处理命令：
+
+```bash
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure_batch.py \
+  --batch-size 10000 \
+  --walk-length 20 \
+  --num-walks 5 \
+  --p 1.0 \
+  --q 1.0
+```
