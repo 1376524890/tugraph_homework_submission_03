@@ -10,3 +10,4 @@ docker/tugraph-logs/
 docker/tugraph-import/
 docker/tugraph-tmp/
 archive/
+logs/

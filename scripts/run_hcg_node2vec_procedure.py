@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import requests
+from requests import exceptions as requests_exceptions
 
 from tugraph_homework.common import DEFAULT_PASSWORD, DEFAULT_USER
 
@@ -39,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-start-nodes", type=int, default=100)
     parser.add_argument("--start-vid", type=int, default=-1)
     parser.add_argument("--timeout", type=float, default=600)
+    parser.add_argument("--delete-timeout", type=float, default=300)
     parser.add_argument("--in-process", action="store_true")
     return parser.parse_args()
 
@@ -57,13 +59,22 @@ def auth_headers(jwt: str) -> dict[str, str]:
     return {"Authorization": "Bearer " + jwt}
 
 
+def delete_procedure(args: argparse.Namespace, jwt: str) -> bool:
+    url = args.http.rstrip("/") + f"/db/{args.graph}/python_plugin/{args.procedure_name}"
+    try:
+        response = requests.delete(url, headers=auth_headers(jwt), timeout=args.delete_timeout)
+        if response.status_code not in (200, 400, 404):
+            response.raise_for_status()
+        return True
+    except requests_exceptions.Timeout:
+        print(f"delete_timeout_after_seconds={args.delete_timeout}; continuing with upload")
+        return False
+
+
 def upload(args: argparse.Namespace, jwt: str) -> None:
     url = args.http.rstrip("/") + f"/db/{args.graph}/python_plugin"
     if args.delete_first:
-        delete_url = url + "/" + args.procedure_name
-        response = requests.delete(delete_url, headers=auth_headers(jwt), timeout=30)
-        if response.status_code not in (200, 400, 404):
-            response.raise_for_status()
+        delete_procedure(args, jwt)
 
     code = args.procedure_path.read_bytes()
     payload = {
@@ -77,8 +88,15 @@ def upload(args: argparse.Namespace, jwt: str) -> None:
     headers = auth_headers(jwt) | {"Content-Type": "application/json"}
     response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=60)
     if response.status_code == 400 and "already exists" in response.text:
-        print("upload_skipped=already_exists")
-        return
+        if args.delete_first:
+            print("upload_conflict_retry_delete=1")
+            delete_procedure(args, jwt)
+            response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=60)
+            if response.status_code == 400 and "already exists" in response.text:
+                raise RuntimeError("upload_failed_after_delete_retry=already_exists")
+        else:
+            print("upload_skipped=already_exists")
+            return
     response.raise_for_status()
     print("upload=ok")
 

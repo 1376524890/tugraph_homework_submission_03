@@ -35,6 +35,7 @@ def _parse_params(input_text):
     start_offset = _safe_int(params.get("start_offset", 0), 0)
     start_vid = _safe_int(params.get("start_vid", -1), -1)
     seed = _safe_int(params.get("seed", 20260524), 20260524)
+    max_elapsed_seconds = _safe_float(params.get("max_elapsed_seconds", 0), 0)
     return {
         "output_path": params.get("output_path", "/tmp/hcg_walks_node2vec_py_batch.txt"),
         "id_map_path": params.get("id_map_path", "/tmp/hcg_node_id_map_node2vec_py_batch.csv"),
@@ -48,6 +49,7 @@ def _parse_params(input_text):
         "seed": seed,
         "return_preview_lines": max(0, _safe_int(params.get("return_preview_lines", 5), 5)),
         "only_start_nodes_with_out_edges": bool(params.get("only_start_nodes_with_out_edges", True)),
+        "max_elapsed_seconds": max_elapsed_seconds if max_elapsed_seconds > 0 else 0,
     }
 
 
@@ -70,6 +72,11 @@ def Process(db, input):
     touched = set()
     preview = []
     walk_count = 0
+    completed_start_node_count = 0
+    stopped_reason = ""
+
+    def time_budget_exceeded():
+        return params["max_elapsed_seconds"] > 0 and (time.time() - started) >= params["max_elapsed_seconds"]
 
     def get_neighbors(vid):
         vid = int(vid)
@@ -109,8 +116,11 @@ def Process(db, input):
     try:
         start_nodes = pick_start_nodes()
         with open(params["output_path"], "w", encoding="utf-8") as walks_out:
-            for _ in range(params["num_walks"]):
+            for walk_round in range(params["num_walks"]):
                 for start_vid in start_nodes:
+                    if time_budget_exceeded():
+                        stopped_reason = "max_elapsed_seconds"
+                        break
                     walk = [int(start_vid)]
                     previous = None
                     current = int(start_vid)
@@ -141,6 +151,10 @@ def Process(db, input):
                     if len(preview) < params["return_preview_lines"]:
                         preview.append(line)
                     walk_count += 1
+                    if walk_round == 0:
+                        completed_start_node_count += 1
+                if stopped_reason:
+                    break
 
         with open(params["id_map_path"], "w", encoding="utf-8") as id_map_out:
             id_map_out.write("vid,token\n")
@@ -156,8 +170,11 @@ def Process(db, input):
             "start_node_count": len(start_nodes),
             "next_start_offset": params["start_offset"] + len(start_nodes),
             "walk_count": walk_count,
+            "completed_start_node_count": completed_start_node_count,
             "walk_length": params["walk_length"],
             "num_walks": params["num_walks"],
+            "max_elapsed_seconds": params["max_elapsed_seconds"],
+            "stopped_reason": stopped_reason,
             "p": params["p"],
             "q": params["q"],
             "touched_node_count": len(touched),
