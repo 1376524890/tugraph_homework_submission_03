@@ -2083,3 +2083,148 @@ PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
 ```
 
 验证结果：A-only bundle 成功生成，包含 `15` 个文件，manifest 显示大小约 `0.55 GiB`。测试目录已清理。
+
+## 2026-05-25 HCG 分类训练数据网络迁移方案
+
+迁移目标：将已经准备好的分类训练 bundle 迁移到另一台没有 TuGraph 服务的机器上，只运行分类器训练与结果分析。
+
+推荐优先级：
+
+1. `rsync` / `scp`：最直接，适合当前约 `6.4 GiB` parquet 数据。
+2. `rclone` 到网盘或对象存储：适合无法 SSH 直连且需要断点续传的环境。
+3. Git LFS：可用但不作为首选，除非确认私有仓库和 LFS 配额足够。
+
+### 首选：rsync 目录同步
+
+先准备 bundle：
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
+  --output-dir data/exports/hcg_classification_training_bundle \
+  --feature-groups A,B,C \
+  --force
+```
+
+传到目标机器：
+
+```bash
+rsync -avh --progress \
+  data/exports/hcg_classification_training_bundle/ \
+  user@target-host:/path/to/hcg_classification_training_bundle/
+```
+
+说明：
+
+- `rsync` 支持重复执行同一条命令来补传。
+- 如果网络中断，重新执行会跳过已完成文件或继续传输缺失部分。
+- 目录末尾的 `/` 表示同步目录内容到目标目录。
+
+目标机器启动训练：
+
+```bash
+cd /path/to/hcg_classification_training_bundle
+python3 -m pip install -r requirements-classification.txt
+
+PYTHONPATH=src python3 scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+### scp 备选
+
+如果目标机器只支持基础 SSH，可以使用：
+
+```bash
+scp -r data/exports/hcg_classification_training_bundle \
+  user@target-host:/path/to/
+```
+
+`scp` 简单，但不如 `rsync` 适合断点续传。
+
+### tar 后传输
+
+如果希望传单个文件：
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
+  --output-dir data/exports/hcg_classification_training_bundle \
+  --feature-groups A,B,C \
+  --archive \
+  --compress none \
+  --force
+```
+
+生成：
+
+```text
+data/exports/hcg_classification_training_bundle.tar
+```
+
+传输：
+
+```bash
+rsync -avh --progress \
+  data/exports/hcg_classification_training_bundle.tar \
+  user@target-host:/path/to/
+```
+
+目标机器解包：
+
+```bash
+tar -xf hcg_classification_training_bundle.tar
+cd hcg_classification_training_bundle
+```
+
+说明：parquet 已压缩，继续 gzip 通常节省有限且会增加打包/解包时间。因此默认建议 `--compress none`。
+
+### Git LFS 方案
+
+Git LFS 可以用于网络迁移，但不推荐作为首选。原因：
+
+- A/B/C parquet 合计约 `6.4 GiB`，容易触发 Git LFS 存储或流量配额。
+- 数据集可能有隐私或许可限制，应只放私有仓库。
+- 当前 `.gitignore` 已忽略 `data/features/hcg/classification/datasets*/`，若使用 Git LFS，需要显式 `git add -f`。
+
+示例：
+
+```bash
+git lfs install
+git lfs track "*.parquet"
+git add .gitattributes
+
+git add scripts/train_hcg_classifiers.py \
+        scripts/check_hcg_classifier_results.py \
+        scripts/render_hcg_classification_figures.py \
+        scripts/prepare_hcg_classification_training_bundle.py \
+        src/tugraph_homework \
+        README.md \
+        docs/experiment_record.md
+
+git add -f data/features/hcg/classification/datasets/*.parquet
+
+git commit -m "Add HCG classification training bundle"
+git push origin main
+```
+
+目标机器：
+
+```bash
+git lfs install
+git clone <repo-url>
+cd <repo>
+git lfs pull
+```
+
+推荐结论：
+
+- 两台机器可 SSH 互通时，优先使用 `rsync`。
+- 不能 SSH 直连时，使用 `rclone` 或对象存储中转。
+- 只有在明确 LFS 配额足够且仓库私有时，才使用 Git LFS。
