@@ -9,6 +9,8 @@ data/features/hcg/node2vec/*.parquet
 data/features/hcg/node2vec/*.model
 data/features/hcg/node2vec/*.model.*
 data/features/hcg/classification/datasets*/
+data/features/hcg/classification/results*/
+runs/hcg_classification*/
 docker/tugraph-data/
 docker/tugraph-logs/
 docker/tugraph-import/

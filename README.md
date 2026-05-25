@@ -596,7 +596,151 @@ flow_emb = concat(src_emb, dst_emb, abs(src_emb - dst_emb), src_emb * dst_emb)
 
 若 endpoint embedding 维度为 `64`，则 `flow_emb` 维度为 `256`。
 
-## 7. 查询视图
+## 7. HCG 分类器训练
+
+分类训练只消费已构建并校验通过的 A/B/C parquet，不重新构建特征、不重新训练 Word2Vec、不重新生成 walks、不重新导入 TuGraph。
+
+输入数据：
+
+| 组别 | 路径 | 含义 |
+| --- | --- | --- |
+| A | `data/features/hcg/classification/datasets/A_raw_flow_features.parquet` | 91 个 raw flow 特征 |
+| B | `data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet` | 258 个 HCG flow embedding 特征 |
+| C | `data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet` | raw + HCG 融合特征 |
+
+新增入口：
+
+| 脚本 | 作用 |
+| --- | --- |
+| `scripts/train_hcg_classifiers.py` | 独立训练 A/B/C × Dummy、Logistic SGD、Decision Tree、LightGBM、KNN sample |
+| `scripts/check_hcg_classifier_results.py` | 检查 summary、任务目录、指标、模型、scaler、LightGBM importance 和 TensorBoard 产物 |
+| `scripts/render_hcg_classification_figures.py` | 读取结果目录，生成论文可用的 Matplotlib 静态图 |
+| `src/tugraph_homework/experiment_monitor.py` | 共享进度事件、原子写入、运行状态 Markdown 和终端进度条 |
+
+安装训练依赖：
+
+```bash
+conda run -n tugraph python -m pip install scikit-learn joblib lightgbm matplotlib tensorboard tensorboardX \
+  -i https://mirrors.aliyun.com/pypi/simple
+```
+
+smoke test：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results_smoke \
+  --runs-dir runs/hcg_classification_smoke \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --sample-train 100000 \
+  --sample-valid 20000 \
+  --sample-test 20000 \
+  --knn-train-sample 50000 \
+  --knn-test-sample 20000 \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+结果检查：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/check_hcg_classifier_results.py \
+  --results-dir data/features/hcg/classification/results_smoke \
+  --expected-feature-groups A,B,C \
+  --expected-models dummy_most_frequent,dummy_stratified,logistic_sgd,decision_tree,lightgbm,knn_sample
+```
+
+全量一键运行：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --sample-train 0 \
+  --sample-valid 0 \
+  --sample-test 0 \
+  --knn-train-sample 200000 \
+  --knn-test-sample 100000 \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+只补跑缺失任务：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --only-missing \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+监控文件：
+
+```text
+data/features/hcg/classification/results/progress.jsonl
+data/features/hcg/classification/results/metrics_live.csv
+data/features/hcg/classification/results/running_status.md
+data/features/hcg/classification/results/classifier_summary.md
+runs/hcg_classification/
+```
+
+查看状态：
+
+```bash
+cat data/features/hcg/classification/results/running_status.md
+tail -n 20 data/features/hcg/classification/results/progress.jsonl
+tensorboard --logdir runs/hcg_classification --host 0.0.0.0 --port 6006
+```
+
+重新画图，不重新训练：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/render_hcg_classification_figures.py \
+  --results-dir data/features/hcg/classification/results
+```
+
+每个任务目录独立保存 `task_status.json`、`metrics.json`、`classification_report.csv`、`confusion_matrix.csv`、模型文件和必要的 `scaler.pkl`。`--resume` 会跳过已 completed 且核心输出完整的任务；`--force` 会覆盖指定任务目录；KNN 默认只采样运行。
+
+内存保护和任务隔离默认开启：
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `--isolate-tasks` | 开启 | 父进程逐个启动子进程执行单任务；子进程异常退出或被 OOM 杀死时，父进程记录 failed 并继续后续任务。 |
+| `--memory-guard` | 开启 | 任务开始前基于 parquet 行数、特征数和模型类型估算峰值内存；超过安全阈值时写 `status=skipped`。 |
+| `--max-estimated-memory-gb` | `0` | 显式设置单任务估算峰值上限；`0` 表示自动使用可用内存减去保留内存。 |
+| `--min-available-memory-gb` | `2.0` | 自动阈值下至少保留的系统内存。 |
+| `--no-memory-guard` | 关闭保护 | 仅在确认机器内存足够时使用。 |
+| `--no-isolate-tasks` | 关闭隔离 | 仅用于调试；正式长跑不建议关闭。 |
+
+当前 4 核、7.7 GiB 内存机器的全量峰值估算：
+
+| 组别 | X float32 矩阵 | Logistic | Decision Tree | LightGBM | KNN sample |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A | 1.21 GiB | 6.12 GiB | 5.64 GiB | 9.09 GiB | 5.40 GiB |
+| B | 3.44 GiB | 13.69 GiB | 12.31 GiB | 18.44 GiB | 11.63 GiB |
+| C | 4.65 GiB | 17.81 GiB | 15.95 GiB | 23.53 GiB | 15.02 GiB |
+
+因此在当前机器上，B/C 全量训练默认会被内存保护跳过；A 组部分模型也接近或超过安全阈值。若要完整跑 B/C，建议换到至少 32 GiB 内存机器，C 组 LightGBM 更稳妥的配置是 48-64 GiB。
+
+## 8. 查询视图
 
 查询视图从 TCG 的 `causes_full_parts` 派生，用于按 `delta_seconds`、关系类型和前驱/后继数量生成子图：
 
@@ -615,7 +759,7 @@ PYTHONPATH=src python3 scripts/query_tcg_by_delta.py \
 data/processed/tcg/query_views/causes_delta_5s.parquet.report.md
 ```
 
-## 8. 校验重点
+## 9. 校验重点
 
 - `flows.csv` 中的 `record_id` 必须唯一。
 - `flow_id` 只作为普通属性，不作为 Flow 主键。

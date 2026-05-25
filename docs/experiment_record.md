@@ -1686,3 +1686,305 @@ flow_emb = concat(src_emb, dst_emb, abs(src_emb - dst_emb), src_emb * dst_emb)
 若 endpoint embedding 维度为 `64`，则 `flow_emb` 维度为 `256`。
 
 下一步：基于 `src_endpoint` 和 `dst_endpoint` 构造 flow 级分类特征。
+
+## 2026-05-25 HCG 分类器训练与结果分析模块
+
+本次只实现分类器训练、评估、进度监控、可视化和任务级中断续跑模块，不重新构建 A/B/C 特征，不重新训练 Word2Vec，不重新生成 node2vec walks，不重新导入 TuGraph。
+
+新增文件：
+
+| 文件 | 作用 |
+| --- | --- |
+| `scripts/train_hcg_classifiers.py` | 训练 A/B/C × Dummy、Logistic SGD、Decision Tree、LightGBM、KNN sample，按任务独立输出。 |
+| `scripts/check_hcg_classifier_results.py` | 检查结果完整性，包括 summary、progress、task status、metrics、report、confusion matrix、scaler、LightGBM 模型和 importance。 |
+| `scripts/render_hcg_classification_figures.py` | 读取 summary 和各任务输出，生成 Macro-F1、Weighted-F1、Accuracy、训练时间、学习曲线、混淆矩阵和特征重要性图。 |
+| `src/tugraph_homework/experiment_monitor.py` | 原子写 JSON、progress.jsonl、metrics_live.csv、running_status.md、Rich/tqdm 进度条降级。 |
+| `scripts/run_hcg_classification_smoke.sh` | 小样本一键 smoke。 |
+| `scripts/run_hcg_classification_all.sh` | 全量一键训练命令封装。 |
+
+输出根目录：
+
+```text
+data/features/hcg/classification/results/
+runs/hcg_classification/
+```
+
+每个任务按 `<feature_group>/<model_name>/` 独立保存 `task_config.json`、`task_status.json`、`metrics.json`、`classification_report.csv`、`confusion_matrix.csv`、`feature_columns.json`、`label_mapping.json`、`predictions_sample.csv`、模型文件和必要的 `scaler.pkl`。LightGBM 额外保存 `lightgbm_model.txt`、`feature_importance_gain.csv`、`feature_importance_split.csv` 和 `eval_history.csv`。Logistic SGD 和 LightGBM 在 TensorBoard 可用时写入 `runs/hcg_classification/<feature_group>/<model_name>/`。
+
+续跑规则已实现：
+
+- `--resume` / `--skip-existing` 遇到 `status=completed` 且核心输出完整时跳过。
+- `status=running` 或 `status=failed` 的任务在下次运行时从任务级别重跑。
+- `--force` 删除并覆盖指定任务目录。
+- 任务失败默认记录 `failed` 并继续后续任务；`--fail-fast` 可改为失败即停止。
+- `metrics.json`、`task_status.json` 等关键 JSON 先写 `.tmp`，再 `os.replace`。
+
+本次安装并验证的训练依赖：
+
+```bash
+conda run -n tugraph python -m pip install scikit-learn joblib lightgbm matplotlib tensorboard tensorboardX \
+  -i https://mirrors.aliyun.com/pypi/simple
+```
+
+验证命令一：A 组 Dummy 端到端 smoke。
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets_smoke \
+  --output-dir data/features/hcg/classification/results_dev_check \
+  --runs-dir runs/hcg_classification_dev_check \
+  --feature-groups A \
+  --models dummy \
+  --sample-train 100 \
+  --sample-valid 50 \
+  --sample-test 50 \
+  --no-progress \
+  --force \
+  --seed 20260525 \
+  --resume \
+  --render-figures
+```
+
+结果：`A__dummy_most_frequent` 和 `A__dummy_stratified` 均 completed，结果检查 PASS。过程中修复了小样本下 `classification_report(target_names=...)` 与实际出现类别数不一致的问题，改为显式传入全量 labels。
+
+验证命令二：A 组 Logistic、Decision Tree、LightGBM、KNN sample 混合 smoke。
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets_smoke \
+  --output-dir data/features/hcg/classification/results_dev_check_models \
+  --runs-dir runs/hcg_classification_dev_check_models \
+  --feature-groups A \
+  --models logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --sample-train 300 \
+  --sample-valid 100 \
+  --sample-test 100 \
+  --knn-train-sample 120 \
+  --knn-test-sample 60 \
+  --knn-predict-batch-size 25 \
+  --logistic-max-epochs 2 \
+  --logistic-batch-size 128 \
+  --lightgbm-n-estimators 5 \
+  --lightgbm-early-stopping-rounds 2 \
+  --tensorboard \
+  --no-progress \
+  --force \
+  --seed 20260525 \
+  --resume \
+  --render-figures
+```
+
+结果：Logistic、Decision Tree、LightGBM、KNN sample 均 completed；检查脚本在 `--tensorboard` 下 PASS；Logistic 和 LightGBM 均生成 TensorBoard event 文件。过程中修复了 LightGBM callback 在 sklearn wrapper fit 完成前调用 `predict_proba` 的问题，改为使用当前 `env.model` Booster 做验证集预测。
+
+验证命令三：A/B/C × 全模型极小样本矩阵 smoke。
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets_smoke \
+  --output-dir data/features/hcg/classification/results_dev_check_matrix \
+  --runs-dir runs/hcg_classification_dev_check_matrix \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --sample-train 120 \
+  --sample-valid 40 \
+  --sample-test 40 \
+  --knn-train-sample 80 \
+  --knn-test-sample 30 \
+  --knn-predict-batch-size 20 \
+  --logistic-max-epochs 1 \
+  --logistic-batch-size 64 \
+  --lightgbm-n-estimators 2 \
+  --lightgbm-early-stopping-rounds 1 \
+  --tensorboard \
+  --no-progress \
+  --force \
+  --seed 20260525 \
+  --resume \
+  --render-figures
+```
+
+检查命令：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/check_hcg_classifier_results.py \
+  --results-dir data/features/hcg/classification/results_dev_check_matrix \
+  --runs-dir runs/hcg_classification_dev_check_matrix \
+  --expected-feature-groups A,B,C \
+  --expected-models dummy_most_frequent,dummy_stratified,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --tensorboard \
+  --report data/features/hcg/classification/results_dev_check_matrix/check_report.md \
+  --json-report data/features/hcg/classification/results_dev_check_matrix/check_report.json
+```
+
+结果：18 个任务全部 completed，检查脚本 PASS。测试产生的 `results_dev_check*` 和 `runs/hcg_classification_dev_check*` 目录已清理，避免误提交模型或运行产物。
+
+后续全量运行命令：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --sample-train 0 \
+  --sample-valid 0 \
+  --sample-test 0 \
+  --knn-train-sample 200000 \
+  --knn-test-sample 100000 \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+全量运行中可查看：
+
+```bash
+cat data/features/hcg/classification/results/running_status.md
+tail -n 20 data/features/hcg/classification/results/progress.jsonl
+tensorboard --logdir runs/hcg_classification --host 0.0.0.0 --port 6006
+```
+
+全量完成后检查：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/check_hcg_classifier_results.py \
+  --results-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --expected-feature-groups A,B,C \
+  --expected-models dummy_most_frequent,dummy_stratified,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --tensorboard
+```
+
+本次未启动正式全量训练，因此还没有 A/B/C 哪组最好、哪个模型最好、C 是否优于 A/B 等正式实验结论。正式结论会由全量运行后的 `classifier_summary.md`、`classifier_summary.csv` 和 `figures/` 自动汇总。
+
+## 2026-05-25 HCG 分类训练内存风险评估与保护
+
+根据当前机器资源重新评估全量分类任务：
+
+| 资源 | 值 |
+| --- | ---: |
+| CPU | `4 cores` |
+| 内存 | `7.7 GiB` |
+| 当前可用内存 | 约 `4.4 GiB` |
+| Swap | `3.8 GiB` |
+
+三份 parquet 元数据：
+
+| 组别 | 行数 | 特征数 | parquet 大小 | X float32 矩阵 |
+| --- | ---: | ---: | ---: | ---: |
+| A | `3,577,296` | `91` | `0.55 GiB` | `1.21 GiB` |
+| B | `3,577,296` | `258` | `2.63 GiB` | `3.44 GiB` |
+| C | `3,577,296` | `349` | `3.13 GiB` | `4.65 GiB` |
+
+当前训练实现需要先将 parquet 解成 pandas，再复制成 float32 的 X_train/X_valid/X_test。即使 C 组纯 X 矩阵只有 `4.65 GiB`，叠加 pandas block、索引、LabelEncoder 输出、scaler 临时数组、LightGBM Dataset/histogram、预测概率矩阵和 Python 对象后，实际峰值远高于机器内存。
+
+按保守系数估算的单任务峰值：
+
+| 组别 | Dummy | Logistic SGD | Decision Tree | LightGBM | KNN sample |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A | `3.67 GiB` | `6.12 GiB` | `5.64 GiB` | `9.09 GiB` | `5.40 GiB` |
+| B | `8.56 GiB` | `13.69 GiB` | `12.31 GiB` | `18.44 GiB` | `11.63 GiB` |
+| C | `11.23 GiB` | `17.81 GiB` | `15.95 GiB` | `23.53 GiB` | `15.02 GiB` |
+
+结论：在当前 7.7 GiB 内存机器上，C 组全量很可能 OOM；B 组全量也不安全；A 组 LightGBM 已超过安全内存。完整 B/C 全量实验建议在至少 `32 GiB` 内存机器上运行，C 组 LightGBM 更稳妥配置为 `48-64 GiB`。
+
+为防止单个实验拖垮整个实验流程，已完成以下优化：
+
+1. `scripts/train_hcg_classifiers.py` 默认启用 `--isolate-tasks`。
+   - 父进程只做调度。
+   - 每个 `<feature_group>/<model_name>` 在独立子进程中执行。
+   - 子进程失败、异常退出或被 OOM kill 后，父进程将任务标记为 failed 并继续后续任务。
+
+2. 默认启用 `--memory-guard`。
+   - 任务开始前基于 parquet 元数据估算 `matrix_gb` 和 `estimated_peak_gb`。
+   - 自动安全阈值为 `available_memory_gb - min_available_memory_gb`，默认至少保留 `2.0 GiB` 系统内存。
+   - 超过阈值时不加载 parquet，直接写 `task_status.json`，状态为 `skipped`。
+
+3. 新增参数：
+
+```text
+--isolate-tasks / --no-isolate-tasks
+--memory-guard / --no-memory-guard
+--max-estimated-memory-gb
+--min-available-memory-gb
+```
+
+4. `check_hcg_classifier_results.py` 已支持 `status=skipped`，内存保护主动跳过的任务不会被误报为产物损坏。
+
+验证命令：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results_memory_guard_check \
+  --runs-dir runs/hcg_classification_memory_guard_check \
+  --feature-groups C \
+  --models lightgbm \
+  --max-estimated-memory-gb 1 \
+  --no-progress \
+  --force \
+  --resume
+```
+
+验证结果：`C__lightgbm` 未加载 C parquet，直接写为：
+
+```text
+status=skipped
+estimated_peak_gb=23.53
+safe_limit_gb=1.00
+rows=3577296
+features=349
+matrix_gb=4.65
+```
+
+随后检查脚本 PASS：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/check_hcg_classifier_results.py \
+  --results-dir data/features/hcg/classification/results_memory_guard_check \
+  --expected-feature-groups C \
+  --expected-models lightgbm
+```
+
+隔离执行也已用 A 组 dummy smoke 验证通过。测试产生的 `results_memory_guard_check`、`results_isolation_check` 和对应 runs 目录已清理。
+
+当前机器建议运行策略：
+
+```bash
+# 先跑小样本完整矩阵，确认流程和图表。
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results_smoke \
+  --runs-dir runs/hcg_classification_smoke \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --sample-train 100000 \
+  --sample-valid 20000 \
+  --sample-test 20000 \
+  --knn-train-sample 50000 \
+  --knn-test-sample 20000 \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+正式全量如果仍在当前机器上运行，应保留默认内存保护；高风险任务会自动 skipped，不会拖垮整个进程：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
