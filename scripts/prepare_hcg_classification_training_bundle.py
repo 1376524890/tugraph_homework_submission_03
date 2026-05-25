@@ -97,22 +97,26 @@ def add_file(manifest: list[dict[str, Any]], src: Path, dst_root: Path, rel: Pat
 
 
 def write_requirements(output_dir: Path) -> None:
-    text = "\n".join(
-        [
-            "numpy",
-            "pandas",
-            "pyarrow",
-            "scikit-learn",
-            "joblib",
-            "lightgbm",
-            "matplotlib",
-            "rich",
-            "tqdm",
-            "tensorboard",
-            "tensorboardX",
-            "",
-        ]
-    )
+    root_requirements = ROOT / "requirements.txt"
+    if root_requirements.exists():
+        text = root_requirements.read_text(encoding="utf-8")
+    else:
+        text = "\n".join(
+            [
+                "numpy",
+                "pandas",
+                "pyarrow",
+                "scikit-learn",
+                "joblib",
+                "lightgbm",
+                "matplotlib",
+                "rich",
+                "tqdm",
+                "tensorboard",
+                "tensorboardX",
+                "",
+            ]
+        )
     (output_dir / "requirements-classification.txt").write_text(text, encoding="utf-8")
 
 
@@ -209,6 +213,8 @@ def main() -> int:
         src = ROOT / rel
         if src.exists():
             add_file(manifest, src, args.output_dir, Path(rel), args.link)
+    if (ROOT / "requirements.txt").exists():
+        add_file(manifest, ROOT / "requirements.txt", args.output_dir, Path("requirements.txt"), args.link)
     for group in feature_groups:
         filename = DATASET_FILES[group]
         add_file(

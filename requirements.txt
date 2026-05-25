@@ -1,0 +1,11 @@
+numpy
+pandas
+pyarrow
+scikit-learn
+joblib
+lightgbm
+matplotlib
+rich
+tqdm
+tensorboard
+tensorboardX
