@@ -448,15 +448,23 @@ PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure_batch.py \
   --upload \
   --delete-first \
   --call \
-  --batch-size 10000 \
   --walk-length 20 \
   --num-walks 5 \
   --output-path docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt \
-  --id-map-path docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv \
-  --timeout 3600
+  --id-map-path docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
 ```
 
 它会把每批结果写到临时分片目录，最后合并成完整 walks 和 id map 文件。
+
+当前默认批处理配置按 4 核、约 8GB 内存、HCG `865,950` 个有出边起点选择：
+
+| 参数 | 默认值 | 说明 |
+| --- | ---: | --- |
+| `batch_size` | `10000` | 全量约 87 批，减少重复扫描和调用开销 |
+| `timeout` | `1200` | 单批客户端请求超时，单位秒 |
+| `procedure_time_budget` | `900` | 单批服务端执行预算，单位秒 |
+| `walk_length` | `20` | 保持当前全量语料配置 |
+| `num_walks` | `5` | 全量约 4,329,750 条 walk |
 
 ### 6.4 HCG Word2Vec Endpoint Embeddings
 
@@ -496,7 +504,7 @@ data/features/hcg/reports/hcg_word2vec_d64_report.log
 | `negative` | `5` |
 | `sample` | `1e-4` |
 | `epochs` | `5` |
-| `workers` | `min(cpu_count, 8)` |
+| `workers` | `min(cpu_count, 8)`；当前 4 核服务器默认为 `4` |
 | `seed` | `20260525` |
 
 parquet schema：
@@ -527,7 +535,6 @@ PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_word2vec_embeddings
   --negative 5 \
   --sample 1e-4 \
   --epochs 1 \
-  --workers 8 \
   --seed 20260525 \
   --max-lines 100000 \
   --overwrite
@@ -562,7 +569,6 @@ PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_word2vec_embeddings
   --negative 5 \
   --sample 1e-4 \
   --epochs 5 \
-  --workers 8 \
   --seed 20260525 \
   --overwrite
 ```

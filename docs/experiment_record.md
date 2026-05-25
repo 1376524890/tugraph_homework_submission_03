@@ -1037,7 +1037,7 @@ docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
 - `hcg_node2vec_walk_py`
 - `hcg_node2vec_walk_py_batch`
 
-批处理脚本会先统计 HCG 中有出边的起点数，再按批次调用数据库侧 procedure，最后把 walks 和 id map 分片合并为完整文件。全量运行建议从 `--batch-size 10000` 起步，不要再用 `batch-size=1` 这种会产生过多批次日志的参数。
+批处理脚本会先统计 HCG 中有出边的起点数，再按批次调用数据库侧 procedure，最后把 walks 和 id map 分片合并为完整文件。当前默认 `batch_size=10000`，不要再用 `batch-size=1` 这种会产生过多批次日志的参数。
 
 ### 批处理输出与默认参数复核
 
@@ -1062,7 +1062,7 @@ python -m py_compile scripts/run_hcg_node2vec_procedure_batch.py
 | `p` | `1.0` | node2vec return 参数 |
 | `q` | `1.0` | node2vec in-out 参数 |
 | `start_offset` | `-1` | 自动推断续跑位置；输出为空时从 `0` 开始 |
-| `batch_size` | `1000` | 每批起点数 |
+| `batch_size` | `10000` | 每批起点数 |
 | `max_batches` | `0` | 不限制批次数，直到覆盖全部起点 |
 | `progress` | `True` | 默认显示进度条 |
 
@@ -1077,19 +1077,45 @@ python -m py_compile scripts/run_hcg_node2vec_procedure_batch.py
 
 - `walk_length=20,num_walks=5,p=1.0,q=1.0` 符合后续 HCG random walks 配置。
 - `batch_size=1000` 可以正确运行，但全量约 `865,950 / 1000 = 866` 批，调用和清理开销偏多。
-- 文档建议全量实验显式使用 `--batch-size 10000`，约 `87` 批，更适合长任务执行。
-- 本次按要求**不修改脚本默认 batch size**，保留 `DEFAULT_BATCH_SIZE=1000`；后续全量命令通过命令行参数覆盖。
+- 当前服务器为 4 核、约 8GB 内存；`batch_size=10000` 不增加并发，只减少重复扫描和调用次数，全量约 `87` 批，更适合长任务执行。
+- 已将脚本默认值调整为 `DEFAULT_BATCH_SIZE=10000`，并将单批默认 `timeout` / `procedure_time_budget` 调整为 `1200` / `900` 秒。
 
 推荐后续全量批处理命令：
 
 ```bash
 PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure_batch.py \
-  --batch-size 10000 \
   --walk-length 20 \
   --num-walks 5 \
   --p 1.0 \
   --q 1.0
 ```
+
+## 2026-05-25 当前服务器默认配置复核
+
+服务器与数据量：
+
+| 项目 | 当前值 |
+| --- | ---: |
+| CPU | 4 核 Intel i3-9100T |
+| 内存 | 7.7GiB total，约 3.5GiB available |
+| 磁盘 | `/home` 剩余约 57GiB |
+| 原始 CSV | 1.65GiB，约 3,577,296 条 flow 数据行 |
+| HCG Endpoint | 935,600 条数据行 |
+| HCG COMMUNICATES | 1,716,084 条数据行 |
+| 有出边起点 | 865,950 |
+| 全量 walks | 4,329,750 行，约 752MiB |
+| id map | 933,050 个 endpoint token，约 25MiB |
+
+默认配置选择：
+
+| 配置项 | 默认值 | 原因 |
+| --- | ---: | --- |
+| `batch_size` | `10000` | 全量约 87 批，明显少于 1000 批大小的约 866 批；单批仍是串行 procedure，不提高并发压力 |
+| `timeout` | `1200` | 给 10k 起点批次保留足够客户端等待时间 |
+| `procedure_time_budget` | `900` | 控制单批最长服务端执行时间，避免长时间卡死 |
+| `walk_length` | `20` | 保持已完成全量语料与后续 embedding 维度方案一致 |
+| `num_walks` | `5` | 全量语料规模约 4.33M 行，磁盘占用可接受 |
+| Word2Vec `workers` | `0` | 由脚本自动解析为 `min(cpu_count, 8)`，当前服务器即 4 worker |
 
 ## 2026-05-24 实验设计调整：两阶段 HCG Embedding 分类流程
 
@@ -1381,7 +1407,7 @@ data/features/hcg/reports/hcg_word2vec_d64_report.log
 | `negative` | `5` |
 | `sample` | `1e-4` |
 | `epochs` | `5` |
-| `workers` | `min(cpu_count, 8)` |
+| `workers` | `min(cpu_count, 8)`；当前 4 核服务器默认为 `4` |
 | `seed` | `20260525` |
 
 smoke test 命令：
@@ -1401,7 +1427,6 @@ PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_word2vec_embeddings
   --negative 5 \
   --sample 1e-4 \
   --epochs 1 \
-  --workers 8 \
   --seed 20260525 \
   --max-lines 100000 \
   --overwrite
@@ -1467,7 +1492,6 @@ PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_word2vec_embeddings
   --negative 5 \
   --sample 1e-4 \
   --epochs 5 \
-  --workers 8 \
   --seed 20260525 \
   --overwrite
 ```

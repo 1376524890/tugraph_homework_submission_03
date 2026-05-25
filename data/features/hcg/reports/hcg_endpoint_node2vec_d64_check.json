@@ -1,0 +1,54 @@
+{
+  "inputs": {
+    "embeddings": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet",
+    "id_map": "/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv",
+    "walks": "/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt"
+  },
+  "outputs": {
+    "report": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_endpoint_node2vec_d64_check.md",
+    "json_report": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_endpoint_node2vec_d64_check.json",
+    "log_file": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_endpoint_node2vec_d64_check.log"
+  },
+  "parameters": {
+    "expected_dim": 64,
+    "expected_min_rows": 1,
+    "expected_rows": 933050
+  },
+  "metrics": {
+    "row_count": 933050,
+    "column_count": 66,
+    "embedding_dim": 64,
+    "expected_dim": 64,
+    "missing_required_column_count": 0,
+    "missing_required_columns": "",
+    "extra_embedding_column_count": 0,
+    "endpoint_id_unique_count": 933050,
+    "nan_count": 0,
+    "inf_count": 0,
+    "id_map_token_count": 933050,
+    "embedding_id_map_intersection_count": 933050,
+    "embedding_not_in_id_map_token_count": 0,
+    "id_map_not_trained_token_count": 0,
+    "id_map_coverage_percent": 100.0,
+    "walk_unique_token_count": 933050,
+    "walk_tokens_covered_count": 933050,
+    "walk_tokens_missing_count": 0,
+    "walk_token_coverage_percent": 100.0,
+    "check_elapsed_seconds": 14.05239207699924
+  },
+  "checks": {
+    "parquet_readable": true,
+    "required_columns_present": true,
+    "endpoint_id_non_empty": true,
+    "endpoint_id_unique": true,
+    "embedding_dim_matches_expected": true,
+    "no_extra_embedding_columns": true,
+    "no_nan": true,
+    "no_inf": true,
+    "row_count_at_least_expected_min": true,
+    "row_count_equals_expected": true,
+    "all_embeddings_in_id_map": true,
+    "all_walk_tokens_covered": true
+  },
+  "overall_status": "PASS"
+}

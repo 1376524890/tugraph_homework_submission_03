@@ -24,10 +24,12 @@ from tugraph_homework.common import DEFAULT_PASSWORD, DEFAULT_USER, progress_bar
 DEFAULT_HTTP = "http://127.0.0.1:7070"
 DEFAULT_PROCEDURE = Path("procedures/hcg_node2vec_walk_py_batch.py")
 DEFAULT_EDGE_CSV = Path("data/processed/hcg/communicates.csv")
-DEFAULT_BATCH_SIZE = 1000
+# Balanced for the current full HCG size on a 4-core/8GB host: about 87 batches
+# for 865,950 start nodes, without increasing procedure concurrency.
+DEFAULT_BATCH_SIZE = 10000
 DEFAULT_MAX_BATCHES = 0
-DEFAULT_TIMEOUT = 900
-DEFAULT_PROCEDURE_TIME_BUDGET = 600
+DEFAULT_TIMEOUT = 1200
+DEFAULT_PROCEDURE_TIME_BUDGET = 900
 
 
 def parse_args() -> argparse.Namespace:

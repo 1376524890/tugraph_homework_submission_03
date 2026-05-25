@@ -1,0 +1,390 @@
+{
+  "inputs": {
+    "walks": "/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt",
+    "id_map": "/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv"
+  },
+  "outputs": {
+    "parquet": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet",
+    "model": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.model",
+    "report": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_word2vec_d64_report.md",
+    "json_report": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_word2vec_d64_report.json",
+    "log_file": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_word2vec_d64_report.log"
+  },
+  "parameters": {
+    "vector_size": 64,
+    "window": 5,
+    "min_count": 1,
+    "sg": 1,
+    "negative": 5,
+    "sample": 0.0001,
+    "epochs": 5,
+    "workers": 4,
+    "seed": 20260525,
+    "max_lines": 0
+  },
+  "dependencies": {
+    "gensim": "4.4.0",
+    "numpy": "2.4.6",
+    "pandas": "3.0.3",
+    "pyarrow": "24.0.0"
+  },
+  "metrics": {
+    "walk_line_count": 4329750,
+    "sentence_count": 4329750,
+    "empty_line_count": 0,
+    "average_walk_length": 10.013793175125585,
+    "min_walk_length": 2,
+    "max_walk_length": 20,
+    "walk_unique_token_count": 933050,
+    "id_map_token_count": 933050,
+    "word2vec_vocab_token_count": 933050,
+    "parquet_row_count": 933050,
+    "missing_id_map_token_count": 0,
+    "id_map_coverage": 1.0,
+    "nan_count": 0,
+    "inf_count": 0,
+    "embedding_columns": [
+      "emb_000",
+      "emb_001",
+      "emb_002",
+      "emb_003",
+      "emb_004",
+      "emb_005",
+      "emb_006",
+      "emb_007",
+      "emb_008",
+      "emb_009",
+      "emb_010",
+      "emb_011",
+      "emb_012",
+      "emb_013",
+      "emb_014",
+      "emb_015",
+      "emb_016",
+      "emb_017",
+      "emb_018",
+      "emb_019",
+      "emb_020",
+      "emb_021",
+      "emb_022",
+      "emb_023",
+      "emb_024",
+      "emb_025",
+      "emb_026",
+      "emb_027",
+      "emb_028",
+      "emb_029",
+      "emb_030",
+      "emb_031",
+      "emb_032",
+      "emb_033",
+      "emb_034",
+      "emb_035",
+      "emb_036",
+      "emb_037",
+      "emb_038",
+      "emb_039",
+      "emb_040",
+      "emb_041",
+      "emb_042",
+      "emb_043",
+      "emb_044",
+      "emb_045",
+      "emb_046",
+      "emb_047",
+      "emb_048",
+      "emb_049",
+      "emb_050",
+      "emb_051",
+      "emb_052",
+      "emb_053",
+      "emb_054",
+      "emb_055",
+      "emb_056",
+      "emb_057",
+      "emb_058",
+      "emb_059",
+      "emb_060",
+      "emb_061",
+      "emb_062",
+      "emb_063"
+    ],
+    "vector_size": 64,
+    "training_elapsed_seconds": 537.6676265860006,
+    "training_elapsed_minutes": 8.961127109766675,
+    "seed": 20260525,
+    "id_map_coverage_percent": 100.0
+  },
+  "checks": {
+    "walks_read": true,
+    "vocab_non_empty": true,
+    "parquet_rows_equal_vocab": true,
+    "no_nan": true,
+    "no_inf": true,
+    "id_map_no_missing_tokens": true,
+    "vocab_equals_walk_unique_tokens": true,
+    "full_rows_equal_expected_933050": true
+  },
+  "overall_status": "PASS",
+  "nearest_samples": [
+    {
+      "endpoint_id": "10.200.7.8:3128",
+      "nearest": [
+        {
+          "endpoint_id": "192.168.142.40:53635",
+          "similarity": 0.9723008275032043
+        },
+        {
+          "endpoint_id": "192.168.142.61:2449",
+          "similarity": 0.9715092182159424
+        },
+        {
+          "endpoint_id": "192.168.10.115:49804",
+          "similarity": 0.9713538289070129
+        },
+        {
+          "endpoint_id": "192.168.42.114:50218",
+          "similarity": 0.9712939262390137
+        },
+        {
+          "endpoint_id": "10.230.1.3:49365",
+          "similarity": 0.9709024429321289
+        }
+      ]
+    },
+    {
+      "endpoint_id": "10.200.7.7:3128",
+      "nearest": [
+        {
+          "endpoint_id": "192.168.41.41:52573",
+          "similarity": 0.9735687971115112
+        },
+        {
+          "endpoint_id": "192.168.180.37:1845",
+          "similarity": 0.9721835255622864
+        },
+        {
+          "endpoint_id": "192.168.180.14:40203",
+          "similarity": 0.9706422686576843
+        },
+        {
+          "endpoint_id": "192.168.150.5:41813",
+          "similarity": 0.9703149199485779
+        },
+        {
+          "endpoint_id": "192.168.10.74:52446",
+          "similarity": 0.9699828028678894
+        }
+      ]
+    },
+    {
+      "endpoint_id": "10.200.7.9:3128",
+      "nearest": [
+        {
+          "endpoint_id": "192.168.60.7:49492",
+          "similarity": 0.9386915564537048
+        },
+        {
+          "endpoint_id": "192.168.72.93:50079",
+          "similarity": 0.9386150240898132
+        },
+        {
+          "endpoint_id": "192.168.42.57:64484",
+          "similarity": 0.9371427893638611
+        },
+        {
+          "endpoint_id": "192.168.42.77:65410",
+          "similarity": 0.936899721622467
+        },
+        {
+          "endpoint_id": "192.168.72.35:55832",
+          "similarity": 0.9366811513900757
+        }
+      ]
+    },
+    {
+      "endpoint_id": "10.200.7.5:3128",
+      "nearest": [
+        {
+          "endpoint_id": "192.168.142.68:49249",
+          "similarity": 0.8967574834823608
+        },
+        {
+          "endpoint_id": "192.168.32.80:52800",
+          "similarity": 0.8931548595428467
+        },
+        {
+          "endpoint_id": "192.168.220.176:59212",
+          "similarity": 0.8931459188461304
+        },
+        {
+          "endpoint_id": "192.168.60.29:49533",
+          "similarity": 0.8910015225410461
+        },
+        {
+          "endpoint_id": "192.168.42.31:50683",
+          "similarity": 0.8908801674842834
+        }
+      ]
+    },
+    {
+      "endpoint_id": "10.200.7.6:3128",
+      "nearest": [
+        {
+          "endpoint_id": "192.168.81.7:49210",
+          "similarity": 0.8439300656318665
+        },
+        {
+          "endpoint_id": "192.168.112.14:58688",
+          "similarity": 0.8414827585220337
+        },
+        {
+          "endpoint_id": "10.230.1.240:62495",
+          "similarity": 0.841265082359314
+        },
+        {
+          "endpoint_id": "192.168.72.35:50349",
+          "similarity": 0.8408097624778748
+        },
+        {
+          "endpoint_id": "192.168.72.35:50377",
+          "similarity": 0.8405752778053284
+        }
+      ]
+    },
+    {
+      "endpoint_id": "10.200.7.4:3128",
+      "nearest": [
+        {
+          "endpoint_id": "192.168.130.93:51084",
+          "similarity": 0.8177785277366638
+        },
+        {
+          "endpoint_id": "192.168.110.20:54695",
+          "similarity": 0.8099949955940247
+        },
+        {
+          "endpoint_id": "192.168.72.50:50849",
+          "similarity": 0.8079788088798523
+        },
+        {
+          "endpoint_id": "192.168.31.3:51150",
+          "similarity": 0.807840883731842
+        },
+        {
+          "endpoint_id": "192.168.180.51:57859",
+          "similarity": 0.8073809742927551
+        }
+      ]
+    },
+    {
+      "endpoint_id": "179.1.4.230:443",
+      "nearest": [
+        {
+          "endpoint_id": "10.200.7.199:46331",
+          "similarity": 0.9806767106056213
+        },
+        {
+          "endpoint_id": "10.200.7.217:55169",
+          "similarity": 0.9708091616630554
+        },
+        {
+          "endpoint_id": "10.200.7.218:55023",
+          "similarity": 0.9696491360664368
+        },
+        {
+          "endpoint_id": "10.200.7.196:60711",
+          "similarity": 0.9663775563240051
+        },
+        {
+          "endpoint_id": "104.16.144.50:443",
+          "similarity": 0.9650930166244507
+        }
+      ]
+    },
+    {
+      "endpoint_id": "179.1.4.244:443",
+      "nearest": [
+        {
+          "endpoint_id": "10.200.7.218:45609",
+          "similarity": 0.9753377437591553
+        },
+        {
+          "endpoint_id": "74.125.3.57:443",
+          "similarity": 0.9717428088188171
+        },
+        {
+          "endpoint_id": "54.192.90.80:80",
+          "similarity": 0.9689143896102905
+        },
+        {
+          "endpoint_id": "10.200.7.217:54750",
+          "similarity": 0.9662919640541077
+        },
+        {
+          "endpoint_id": "34.206.168.166:443",
+          "similarity": 0.9645416736602783
+        }
+      ]
+    },
+    {
+      "endpoint_id": "179.1.4.251:443",
+      "nearest": [
+        {
+          "endpoint_id": "10.200.7.194:43600",
+          "similarity": 0.9713510274887085
+        },
+        {
+          "endpoint_id": "198.145.13.11:443",
+          "similarity": 0.9687992334365845
+        },
+        {
+          "endpoint_id": "10.200.7.218:48586",
+          "similarity": 0.9668970704078674
+        },
+        {
+          "endpoint_id": "72.246.211.85:443",
+          "similarity": 0.9660087823867798
+        },
+        {
+          "endpoint_id": "10.200.7.218:42487",
+          "similarity": 0.9657102823257446
+        }
+      ]
+    },
+    {
+      "endpoint_id": "179.1.4.231:443",
+      "nearest": [
+        {
+          "endpoint_id": "54.192.160.223:443",
+          "similarity": 0.9717402458190918
+        },
+        {
+          "endpoint_id": "199.187.193.133:443",
+          "similarity": 0.9693912863731384
+        },
+        {
+          "endpoint_id": "10.200.7.218:41071",
+          "similarity": 0.9690024852752686
+        },
+        {
+          "endpoint_id": "10.200.7.196:54834",
+          "similarity": 0.9663711786270142
+        },
+        {
+          "endpoint_id": "54.192.90.6:80",
+          "similarity": 0.9647029638290405
+        }
+      ]
+    }
+  ],
+  "join_design": {
+    "level": "Endpoint",
+    "join_keys": [
+      "src_endpoint",
+      "dst_endpoint"
+    ],
+    "flow_embedding": "concat(src_emb, dst_emb, abs(src_emb - dst_emb), src_emb * dst_emb)",
+    "flow_embedding_dim_if_d64": 256
+  }
+}

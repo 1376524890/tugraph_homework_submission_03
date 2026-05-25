@@ -1,0 +1,30 @@
+2026-05-25 11:09:58 INFO HCG Word2Vec training started
+2026-05-25 11:09:58 INFO walks=/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt size=788255081 bytes
+2026-05-25 11:09:58 INFO id_map=/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv size=25860824 bytes
+2026-05-25 11:09:58 INFO parameters: vector_size=64 window=5 min_count=1 sg=1 negative=5 sample=0.0001 epochs=5 workers=4 seed=20260525 max_lines=0
+2026-05-25 11:09:58 INFO reading id map: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
+2026-05-25 11:10:00 INFO id map loaded: 933050 tokens
+2026-05-25 11:10:00 INFO summarizing walks: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt max_lines=0
+2026-05-25 11:10:13 INFO walk summary finished: lines=4329750 unique_tokens=933050 avg_len=10.0138
+2026-05-25 11:10:13 INFO initializing Word2Vec model
+2026-05-25 11:10:13 INFO building Word2Vec vocabulary
+2026-05-25 11:10:43 INFO vocabulary built: vocab=933050 corpus_count=4329750 corpus_total_words=43357221
+2026-05-25 11:10:43 INFO training Word2Vec
+2026-05-25 11:10:43 INFO training epoch 1/5 started
+2026-05-25 11:12:24 INFO training epoch 1/5 finished in 100.85s
+2026-05-25 11:12:24 INFO training epoch 2/5 started
+2026-05-25 11:13:58 INFO training epoch 2/5 finished in 93.45s
+2026-05-25 11:13:58 INFO training epoch 3/5 started
+2026-05-25 11:15:30 INFO training epoch 3/5 finished in 92.12s
+2026-05-25 11:15:30 INFO training epoch 4/5 started
+2026-05-25 11:16:59 INFO training epoch 4/5 finished in 89.63s
+2026-05-25 11:16:59 INFO training epoch 5/5 started
+2026-05-25 11:18:29 INFO training epoch 5/5 finished in 89.44s
+2026-05-25 11:18:29 INFO saving gensim model: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.model
+2026-05-25 11:18:31 INFO gensim model saved
+2026-05-25 11:18:31 INFO building embedding dataframe
+2026-05-25 11:18:34 INFO writing parquet: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet rows=933050 dim=64
+2026-05-25 11:18:55 INFO parquet write finished
+2026-05-25 11:18:56 INFO computing nearest samples: 10
+2026-05-25 11:18:56 INFO reports written: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_word2vec_d64_report.md /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_word2vec_d64_report.json
+2026-05-25 11:18:56 INFO HCG Word2Vec training finished: status=PASS elapsed=537.67s
