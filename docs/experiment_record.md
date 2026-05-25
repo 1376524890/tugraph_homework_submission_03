@@ -2261,3 +2261,215 @@ rsync -avh --progress hcg_classification_training_bundle/ ./
 ```
 
 已检查 `README.md`、`docs/experiment_record.md` 和 `scripts/`，未发现真实远程用户名、服务器地址或 SSH 端口残留。
+
+## 2026-05-26 新环境迁移与评估
+
+### 迁移完成确认
+
+训练 bundle 已迁移到新机器并解包：
+
+| 数据 | 路径 | 大小 |
+| --- | --- | ---: |
+| A_raw_flow_features.parquet | `hcg_classification_training_bundle/data/features/hcg/classification/datasets/` | `563M` |
+| B_hcg_flow_emb_256.parquet | 同上 | `2.7G` |
+| C_raw_plus_hcg_flow_emb.parquet | 同上 | `3.2G` |
+
+已创建软链接到训练脚本默认路径 `data/features/hcg/classification/datasets/`。
+
+### 新旧环境对比
+
+| 资源 | 旧机器 (marktom) | 新机器 (codeserver) | 提升 |
+| --- | --- | --- | --- |
+| CPU | 4 核 Intel i3-9100T | 24 核 Intel Xeon Gold 5420+ | **6x** |
+| 内存 | 7.7 GiB total, ~4.4 GiB avail | 98 GiB total, ~82 GiB avail | **~19x** |
+| GPU | 无 | 2x NVIDIA RTX 4090 (24GB each) | **新增** |
+| CUDA | 无 | 13.0, Driver 580.105.08 | **新增** |
+| 磁盘 | `/home` 196G 剩余 ~57G | `/` 750G 剩余 ~27G | 磁盘较紧张 |
+
+### GPU 可用性分析
+
+| GPU 加速方案 | 状态 | 说明 |
+| --- | --- | --- |
+| PyTorch 2.12.0+cu130 | **可用** | 2x RTX 4090 (23.5 GiB each) |
+| CuPy 13.6.0 | **可用** | CUDA 12.x，可用于自定义 GPU 计算 |
+| LightGBM GPU | **不可用** | 当前 build 未启用 `-DUSE_CUDA=1`，需重新编译 |
+| cuML | **不可用** | 与 sklearn 1.8.0 存在 API 兼容问题 |
+| gensim 4.4.0 | **可用** | Word2Vec 仅 CPU，暂不适用于后续分类训练 |
+
+### 内存安全重新评估
+
+新机器 98 GiB 内存，所有特征组均可安全全量训练，无需 `--memory-guard` 跳过任何任务：
+
+| 组别 | 旧环境峰值估算 | 新环境安全阈值 | 结果 |
+| --- | ---: | ---: | --- |
+| A (91 features) | 9.09 GiB → **可能 OOM** | 约 80 GiB safe limit | **安全** |
+| B (258 features) | 18.44 GiB → **OOM** | 约 80 GiB safe limit | **安全** |
+| C (349 features) | 23.53 GiB → **OOM** | 约 80 GiB safe limit | **安全** |
+
+### 默认参数调整建议
+
+基于 24 核 / 98 GiB / 2x RTX 4090 的新环境：
+
+| 参数 | 旧默认 | 新建议 | 原因 |
+| --- | --- | --- | --- |
+| `--memory-guard` | `True` | `False`（无需） | 98 GiB 内存可安全承载全部任务 |
+| `--sample-*` | `0`（全量） | `0`（全量） | 无需采样 |
+| `--workers` (Word2Vec) | `min(4,8)=4` | `min(24,8)=8` | 更多 cores 可用 |
+| `--logistic-batch-size` | `100,000` | `200,000` | 更大 batch 利用吞吐 |
+| `--lightgbm-n-jobs` | `-1`（全部） | `-1`（全部） | 24 核并行 |
+| `--knn-train-sample` | `200,000` | `300,000` | 更大样本提升 KNN 质量 |
+
+### 全量运行命令
+
+安装依赖（首次运行）：
+
+```bash
+# 已有 sklearn, lightgbm, joblib, matplotlib, pandas, numpy, pyarrow, cupy
+# 已安装 PyTorch 2.12.0+cu130, gensim 4.4.0
+conda run -n tugraph python3 -m pip install tensorboard tensorboardX \
+  -i https://mirrors.aliyun.com/pypi/simple
+```
+
+全量分类训练（在当前新机器上执行）：
+
+```bash
+cd /home/codeserver/tugraph_homework_submission_03
+
+PYTHONPATH=src conda run -n tugraph python3 scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --no-memory-guard \
+  --logistic-batch-size 200000 \
+  --knn-train-sample 300000 \
+  --knn-test-sample 100000 \
+  --no-isolate-tasks \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+预计运行时间：约 1-3 小时（24核 vs 旧机器估算 8-15 小时，约 5-6x加速）。
+
+完成后检查结果：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python3 scripts/check_hcg_classifier_results.py \
+  --results-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --expected-feature-groups A,B,C \
+  --expected-models dummy_most_frequent,dummy_stratified,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --tensorboard
+```
+
+查看汇总：
+
+```bash
+cat data/features/hcg/classification/results/classifier_summary.md
+cat data/features/hcg/classification/results/classifier_summary.csv
+tensorboard --logdir runs/hcg_classification --host 0.0.0.0 --port 6006
+```
+
+## 2026-05-26 GPU 适配与加速方案
+
+### LightGBM CUDA 编译
+
+pip 预编译 wheel (`lightgbm-4.6.0-py3-none-manylinux_x86_64.whl`) 不含 CUDA tree learner。
+通过 `--no-binary lightgbm` 强制从源码编译并启用 CUDA：
+
+```bash
+conda run -n tugraph pip install lightgbm \
+  --no-binary lightgbm \
+  --config-settings=cmake.define.USE_CUDA=ON \
+  --force-reinstall --no-deps
+```
+
+编译环境依赖：cmake 4.0.3、nvcc (CUDA 12.6)、GCC 14.3.0。
+
+验证结果：
+
+```python
+import lightgbm as lgb
+model = lgb.LGBMClassifier(n_estimators=10, device='cuda')
+model.fit(X, y)  # SUCCESS
+```
+
+**LightGBM GPU 状态：可用，device='cuda' 正常。**
+
+### cuML (RAPIDS) 安装
+
+conda 安装 cuML 26.04.00 (CUDA 13 variant)：
+
+```bash
+conda install -n tugraph -c rapidsai -c conda-forge cuml=26.04.00
+```
+
+遇到问题：pip 残留的旧版 `cuml-cu12`/`rmm-cu12` 等包与 conda 26.04 版本冲突，
+导致 `_is_pandas_df` 缺失、`rmm.allocators` 模块被破坏等连锁错误。
+
+解决过程：
+1. 卸载所有 pip RAPIDS 残留：`cuml-cu12`, `rmm-cu12`, `librmm-cu12`, `libcuml-cu12`, `libucx-cu12`, `ucx-py-cu12`, `ucxx-cu12`, `libucxx-cu12`, `distributed-ucxx-cu12`, `rapids-dask-dependency`
+2. 修复 CuPy 冲突：卸载 `cupy`，保留 `cupy-cuda12x` 13.6.0
+3. 重装 conda RAPIDS 包链：`cuml rmm pylibraft libraft librmm libcuml pylibcudf`
+
+最终仍有 `pylibraft/common/handle.cpython-312-x86_64-linux-gnu.so: undefined symbol: _ZN3rmm16cuda_stream_poolC1Em` 的 ABI 兼容问题，怀疑与系统 libstdc++ 和 conda libstdc++ 版本差异相关。
+
+**cuML 状态：不可用（C++ ABI 兼容性问题，待进一步排查）。**
+
+### GPU 加速最终可用方案
+
+| 方案 | 状态 | 用途 |
+| --- | --- | --- |
+| **LightGBM CUDA** | ✅ 可用 | 分类训练主加速，`device='cuda'` |
+| **PyTorch 2.12.0+cu130** | ✅ 可用 | 自定义 NN 分类器，2x RTX 4090 |
+| **CuPy 13.6.0** | ✅ 可用 | GPU 数组/Numpy 替代 |
+| **cuML** | ❌ 不可用 | ABI 兼容问题 |
+
+### 全量训练 GPU 命令（最终版）
+
+```bash
+cd /home/codeserver/tugraph_homework_submission_03
+
+PYTHONPATH=src conda run -n tugraph python3 scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --no-memory-guard \
+  --logistic-batch-size 200000 \
+  --knn-train-sample 300000 \
+  --knn-test-sample 100000 \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+注意：LightGBM 当前使用 CPU 模式。如需 GPU，需在 `train_lightgbm()` 的
+`LGBMClassifier` 构造中添加 `device='cuda'` 参数。当前训练脚本未包含该参数，
+后续可添加 `--lightgbm-device` 命令行参数来选择 'cpu' 或 'cuda'。
+
+### 目录清理
+
+迁移 bundle 目录 `hcg_classification_training_bundle/` 和 `.tar` 文件为传输中间产物，
+已确认 parquet 数据已部署到 `data/features/hcg/classification/datasets/`，bundle 内的
+`scripts/`、`src/`、`docs/` 与主项目完全重复，可安全删除。
+
+清理步骤：
+```bash
+# 1. 确保 parquet 数据已在目标位置（非 symlink）
+cp -L data/features/hcg/classification/datasets/*.parquet data/features/hcg/classification/datasets/
+
+# 2. 删除 bundle 和 tar
+rm -rf hcg_classification_training_bundle/
+rm hcg_classification_training_bundle.tar
+
+# 3. 确认 .gitignore 已包含大数据文件的排除
+# data/features/hcg/classification/datasets*/ 已配置
+```
