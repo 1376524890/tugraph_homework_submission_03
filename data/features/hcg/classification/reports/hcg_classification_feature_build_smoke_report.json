@@ -1,0 +1,745 @@
+{
+  "inputs": {
+    "raw_csv": "/home/marktom/tugraph/tugraph_homework_submission_03/data/raw/Dataset-Unicauca-Version2-87Atts.csv",
+    "embedding": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet"
+  },
+  "outputs": {
+    "A": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets_smoke/A_raw_flow_features.parquet",
+    "B": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets_smoke/B_hcg_flow_emb_256.parquet",
+    "C": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets_smoke/C_raw_plus_hcg_flow_emb.parquet"
+  },
+  "parameters": {
+    "target": "protocol_name",
+    "max_rows": 100000,
+    "seed": 20260525,
+    "test_size": 0.2,
+    "valid_size": 0.1,
+    "chunk_size": 100000
+  },
+  "metrics": {
+    "raw_read_rows": 100000,
+    "output_rows": 100000,
+    "max_rows": 100000,
+    "target": "protocol_name",
+    "target_class_count": 40,
+    "embedding_endpoint_count": 933050,
+    "src_embedding_missing_count": 0,
+    "src_embedding_missing_ratio": 0.0,
+    "dst_embedding_missing_count": 137,
+    "dst_embedding_missing_ratio": 0.00137,
+    "any_embedding_missing_count": 137,
+    "any_embedding_missing_ratio": 0.00137,
+    "A_raw_feature_count": 91,
+    "B_hcg_feature_count": 258,
+    "C_feature_count": 349,
+    "timestamp_parse_failed_count": 0,
+    "nan_count": 0,
+    "inf_count": 0,
+    "build_elapsed_seconds": 23.82851416700578,
+    "split_method": "deterministic_target_record_hash"
+  },
+  "target_top20": [
+    {
+      "value": "HTTP",
+      "count": 33885
+    },
+    {
+      "value": "GOOGLE",
+      "count": 21310
+    },
+    {
+      "value": "HTTP_PROXY",
+      "count": 13822
+    },
+    {
+      "value": "SSL",
+      "count": 10172
+    },
+    {
+      "value": "HTTP_CONNECT",
+      "count": 7744
+    },
+    {
+      "value": "YOUTUBE",
+      "count": 3929
+    },
+    {
+      "value": "AMAZON",
+      "count": 1509
+    },
+    {
+      "value": "MICROSOFT",
+      "count": 1241
+    },
+    {
+      "value": "WINDOWS_UPDATE",
+      "count": 1081
+    },
+    {
+      "value": "GMAIL",
+      "count": 822
+    },
+    {
+      "value": "SKYPE",
+      "count": 639
+    },
+    {
+      "value": "FACEBOOK",
+      "count": 628
+    },
+    {
+      "value": "YAHOO",
+      "count": 565
+    },
+    {
+      "value": "DROPBOX",
+      "count": 439
+    },
+    {
+      "value": "CONTENT_FLASH",
+      "count": 418
+    },
+    {
+      "value": "TWITTER",
+      "count": 405
+    },
+    {
+      "value": "MSN",
+      "count": 345
+    },
+    {
+      "value": "CLOUDFLARE",
+      "count": 312
+    },
+    {
+      "value": "WIKIPEDIA",
+      "count": 271
+    },
+    {
+      "value": "WHATSAPP",
+      "count": 89
+    }
+  ],
+  "split_counts": {
+    "train": 69876,
+    "valid": 10117,
+    "test": 20007
+  },
+  "split_target_top20": {
+    "train": [
+      {
+        "value": "HTTP",
+        "count": 23643
+      },
+      {
+        "value": "GOOGLE",
+        "count": 14848
+      },
+      {
+        "value": "HTTP_PROXY",
+        "count": 9642
+      },
+      {
+        "value": "SSL",
+        "count": 7093
+      },
+      {
+        "value": "HTTP_CONNECT",
+        "count": 5420
+      },
+      {
+        "value": "YOUTUBE",
+        "count": 2742
+      },
+      {
+        "value": "AMAZON",
+        "count": 1067
+      },
+      {
+        "value": "MICROSOFT",
+        "count": 869
+      },
+      {
+        "value": "WINDOWS_UPDATE",
+        "count": 766
+      },
+      {
+        "value": "GMAIL",
+        "count": 589
+      },
+      {
+        "value": "SKYPE",
+        "count": 465
+      },
+      {
+        "value": "FACEBOOK",
+        "count": 450
+      },
+      {
+        "value": "YAHOO",
+        "count": 381
+      },
+      {
+        "value": "DROPBOX",
+        "count": 309
+      },
+      {
+        "value": "TWITTER",
+        "count": 300
+      },
+      {
+        "value": "CONTENT_FLASH",
+        "count": 299
+      },
+      {
+        "value": "MSN",
+        "count": 243
+      },
+      {
+        "value": "CLOUDFLARE",
+        "count": 225
+      },
+      {
+        "value": "WIKIPEDIA",
+        "count": 193
+      },
+      {
+        "value": "WHATSAPP",
+        "count": 67
+      }
+    ],
+    "valid": [
+      {
+        "value": "HTTP",
+        "count": 3384
+      },
+      {
+        "value": "GOOGLE",
+        "count": 2125
+      },
+      {
+        "value": "HTTP_PROXY",
+        "count": 1440
+      },
+      {
+        "value": "SSL",
+        "count": 1062
+      },
+      {
+        "value": "HTTP_CONNECT",
+        "count": 796
+      },
+      {
+        "value": "YOUTUBE",
+        "count": 414
+      },
+      {
+        "value": "AMAZON",
+        "count": 159
+      },
+      {
+        "value": "MICROSOFT",
+        "count": 134
+      },
+      {
+        "value": "WINDOWS_UPDATE",
+        "count": 114
+      },
+      {
+        "value": "GMAIL",
+        "count": 81
+      },
+      {
+        "value": "YAHOO",
+        "count": 57
+      },
+      {
+        "value": "FACEBOOK",
+        "count": 57
+      },
+      {
+        "value": "SKYPE",
+        "count": 52
+      },
+      {
+        "value": "DROPBOX",
+        "count": 51
+      },
+      {
+        "value": "CONTENT_FLASH",
+        "count": 33
+      },
+      {
+        "value": "CLOUDFLARE",
+        "count": 30
+      },
+      {
+        "value": "WIKIPEDIA",
+        "count": 29
+      },
+      {
+        "value": "TWITTER",
+        "count": 28
+      },
+      {
+        "value": "MSN",
+        "count": 27
+      },
+      {
+        "value": "OFFICE_365",
+        "count": 9
+      }
+    ],
+    "test": [
+      {
+        "value": "HTTP",
+        "count": 6858
+      },
+      {
+        "value": "GOOGLE",
+        "count": 4337
+      },
+      {
+        "value": "HTTP_PROXY",
+        "count": 2740
+      },
+      {
+        "value": "SSL",
+        "count": 2017
+      },
+      {
+        "value": "HTTP_CONNECT",
+        "count": 1528
+      },
+      {
+        "value": "YOUTUBE",
+        "count": 773
+      },
+      {
+        "value": "AMAZON",
+        "count": 283
+      },
+      {
+        "value": "MICROSOFT",
+        "count": 238
+      },
+      {
+        "value": "WINDOWS_UPDATE",
+        "count": 201
+      },
+      {
+        "value": "GMAIL",
+        "count": 152
+      },
+      {
+        "value": "YAHOO",
+        "count": 127
+      },
+      {
+        "value": "SKYPE",
+        "count": 122
+      },
+      {
+        "value": "FACEBOOK",
+        "count": 121
+      },
+      {
+        "value": "CONTENT_FLASH",
+        "count": 86
+      },
+      {
+        "value": "DROPBOX",
+        "count": 79
+      },
+      {
+        "value": "TWITTER",
+        "count": 77
+      },
+      {
+        "value": "MSN",
+        "count": 75
+      },
+      {
+        "value": "CLOUDFLARE",
+        "count": 57
+      },
+      {
+        "value": "WIKIPEDIA",
+        "count": 49
+      },
+      {
+        "value": "OFFICE_365",
+        "count": 17
+      }
+    ]
+  },
+  "raw_features": [
+    "raw_source_port",
+    "raw_destination_port",
+    "raw_protocol",
+    "raw_flow_duration",
+    "raw_total_fwd_packets",
+    "raw_total_backward_packets",
+    "raw_total_length_of_fwd_packets",
+    "raw_total_length_of_bwd_packets",
+    "raw_fwd_packet_length_max",
+    "raw_fwd_packet_length_min",
+    "raw_fwd_packet_length_mean",
+    "raw_fwd_packet_length_std",
+    "raw_bwd_packet_length_max",
+    "raw_bwd_packet_length_min",
+    "raw_bwd_packet_length_mean",
+    "raw_bwd_packet_length_std",
+    "raw_flow_bytes_s",
+    "raw_flow_packets_s",
+    "raw_flow_iat_mean",
+    "raw_flow_iat_std",
+    "raw_flow_iat_max",
+    "raw_flow_iat_min",
+    "raw_fwd_iat_total",
+    "raw_fwd_iat_mean",
+    "raw_fwd_iat_std",
+    "raw_fwd_iat_max",
+    "raw_fwd_iat_min",
+    "raw_bwd_iat_total",
+    "raw_bwd_iat_mean",
+    "raw_bwd_iat_std",
+    "raw_bwd_iat_max",
+    "raw_bwd_iat_min",
+    "raw_fwd_psh_flags",
+    "raw_bwd_psh_flags",
+    "raw_fwd_urg_flags",
+    "raw_bwd_urg_flags",
+    "raw_fwd_header_length",
+    "raw_bwd_header_length",
+    "raw_fwd_packets_s",
+    "raw_bwd_packets_s",
+    "raw_min_packet_length",
+    "raw_max_packet_length",
+    "raw_packet_length_mean",
+    "raw_packet_length_std",
+    "raw_packet_length_variance",
+    "raw_fin_flag_count",
+    "raw_syn_flag_count",
+    "raw_rst_flag_count",
+    "raw_psh_flag_count",
+    "raw_ack_flag_count",
+    "raw_urg_flag_count",
+    "raw_cwe_flag_count",
+    "raw_ece_flag_count",
+    "raw_down_up_ratio",
+    "raw_average_packet_size",
+    "raw_avg_fwd_segment_size",
+    "raw_avg_bwd_segment_size",
+    "raw_fwd_header_length_1",
+    "raw_fwd_avg_bytes_bulk",
+    "raw_fwd_avg_packets_bulk",
+    "raw_fwd_avg_bulk_rate",
+    "raw_bwd_avg_bytes_bulk",
+    "raw_bwd_avg_packets_bulk",
+    "raw_bwd_avg_bulk_rate",
+    "raw_subflow_fwd_packets",
+    "raw_subflow_fwd_bytes",
+    "raw_subflow_bwd_packets",
+    "raw_subflow_bwd_bytes",
+    "raw_init_win_bytes_forward",
+    "raw_init_win_bytes_backward",
+    "raw_act_data_pkt_fwd",
+    "raw_min_seg_size_forward",
+    "raw_active_mean",
+    "raw_active_std",
+    "raw_active_max",
+    "raw_active_min",
+    "raw_idle_mean",
+    "raw_idle_std",
+    "raw_idle_max",
+    "raw_idle_min",
+    "raw_timestamp_epoch",
+    "raw_hour",
+    "raw_dayofweek",
+    "raw_src_port",
+    "raw_dst_port",
+    "raw_src_is_common_service_port",
+    "raw_dst_is_common_service_port",
+    "raw_src_is_proxy_port",
+    "raw_dst_is_proxy_port",
+    "raw_src_port_bucket_code",
+    "raw_dst_port_bucket_code"
+  ],
+  "hcg_features": [
+    "hcg_src_emb_000",
+    "hcg_src_emb_001",
+    "hcg_src_emb_002",
+    "hcg_src_emb_003",
+    "hcg_src_emb_004",
+    "hcg_src_emb_005",
+    "hcg_src_emb_006",
+    "hcg_src_emb_007",
+    "hcg_src_emb_008",
+    "hcg_src_emb_009",
+    "hcg_src_emb_010",
+    "hcg_src_emb_011",
+    "hcg_src_emb_012",
+    "hcg_src_emb_013",
+    "hcg_src_emb_014",
+    "hcg_src_emb_015",
+    "hcg_src_emb_016",
+    "hcg_src_emb_017",
+    "hcg_src_emb_018",
+    "hcg_src_emb_019",
+    "hcg_src_emb_020",
+    "hcg_src_emb_021",
+    "hcg_src_emb_022",
+    "hcg_src_emb_023",
+    "hcg_src_emb_024",
+    "hcg_src_emb_025",
+    "hcg_src_emb_026",
+    "hcg_src_emb_027",
+    "hcg_src_emb_028",
+    "hcg_src_emb_029",
+    "hcg_src_emb_030",
+    "hcg_src_emb_031",
+    "hcg_src_emb_032",
+    "hcg_src_emb_033",
+    "hcg_src_emb_034",
+    "hcg_src_emb_035",
+    "hcg_src_emb_036",
+    "hcg_src_emb_037",
+    "hcg_src_emb_038",
+    "hcg_src_emb_039",
+    "hcg_src_emb_040",
+    "hcg_src_emb_041",
+    "hcg_src_emb_042",
+    "hcg_src_emb_043",
+    "hcg_src_emb_044",
+    "hcg_src_emb_045",
+    "hcg_src_emb_046",
+    "hcg_src_emb_047",
+    "hcg_src_emb_048",
+    "hcg_src_emb_049",
+    "hcg_src_emb_050",
+    "hcg_src_emb_051",
+    "hcg_src_emb_052",
+    "hcg_src_emb_053",
+    "hcg_src_emb_054",
+    "hcg_src_emb_055",
+    "hcg_src_emb_056",
+    "hcg_src_emb_057",
+    "hcg_src_emb_058",
+    "hcg_src_emb_059",
+    "hcg_src_emb_060",
+    "hcg_src_emb_061",
+    "hcg_src_emb_062",
+    "hcg_src_emb_063",
+    "hcg_dst_emb_000",
+    "hcg_dst_emb_001",
+    "hcg_dst_emb_002",
+    "hcg_dst_emb_003",
+    "hcg_dst_emb_004",
+    "hcg_dst_emb_005",
+    "hcg_dst_emb_006",
+    "hcg_dst_emb_007",
+    "hcg_dst_emb_008",
+    "hcg_dst_emb_009",
+    "hcg_dst_emb_010",
+    "hcg_dst_emb_011",
+    "hcg_dst_emb_012",
+    "hcg_dst_emb_013",
+    "hcg_dst_emb_014",
+    "hcg_dst_emb_015",
+    "hcg_dst_emb_016",
+    "hcg_dst_emb_017",
+    "hcg_dst_emb_018",
+    "hcg_dst_emb_019",
+    "hcg_dst_emb_020",
+    "hcg_dst_emb_021",
+    "hcg_dst_emb_022",
+    "hcg_dst_emb_023",
+    "hcg_dst_emb_024",
+    "hcg_dst_emb_025",
+    "hcg_dst_emb_026",
+    "hcg_dst_emb_027",
+    "hcg_dst_emb_028",
+    "hcg_dst_emb_029",
+    "hcg_dst_emb_030",
+    "hcg_dst_emb_031",
+    "hcg_dst_emb_032",
+    "hcg_dst_emb_033",
+    "hcg_dst_emb_034",
+    "hcg_dst_emb_035",
+    "hcg_dst_emb_036",
+    "hcg_dst_emb_037",
+    "hcg_dst_emb_038",
+    "hcg_dst_emb_039",
+    "hcg_dst_emb_040",
+    "hcg_dst_emb_041",
+    "hcg_dst_emb_042",
+    "hcg_dst_emb_043",
+    "hcg_dst_emb_044",
+    "hcg_dst_emb_045",
+    "hcg_dst_emb_046",
+    "hcg_dst_emb_047",
+    "hcg_dst_emb_048",
+    "hcg_dst_emb_049",
+    "hcg_dst_emb_050",
+    "hcg_dst_emb_051",
+    "hcg_dst_emb_052",
+    "hcg_dst_emb_053",
+    "hcg_dst_emb_054",
+    "hcg_dst_emb_055",
+    "hcg_dst_emb_056",
+    "hcg_dst_emb_057",
+    "hcg_dst_emb_058",
+    "hcg_dst_emb_059",
+    "hcg_dst_emb_060",
+    "hcg_dst_emb_061",
+    "hcg_dst_emb_062",
+    "hcg_dst_emb_063",
+    "hcg_absdiff_emb_000",
+    "hcg_absdiff_emb_001",
+    "hcg_absdiff_emb_002",
+    "hcg_absdiff_emb_003",
+    "hcg_absdiff_emb_004",
+    "hcg_absdiff_emb_005",
+    "hcg_absdiff_emb_006",
+    "hcg_absdiff_emb_007",
+    "hcg_absdiff_emb_008",
+    "hcg_absdiff_emb_009",
+    "hcg_absdiff_emb_010",
+    "hcg_absdiff_emb_011",
+    "hcg_absdiff_emb_012",
+    "hcg_absdiff_emb_013",
+    "hcg_absdiff_emb_014",
+    "hcg_absdiff_emb_015",
+    "hcg_absdiff_emb_016",
+    "hcg_absdiff_emb_017",
+    "hcg_absdiff_emb_018",
+    "hcg_absdiff_emb_019",
+    "hcg_absdiff_emb_020",
+    "hcg_absdiff_emb_021",
+    "hcg_absdiff_emb_022",
+    "hcg_absdiff_emb_023",
+    "hcg_absdiff_emb_024",
+    "hcg_absdiff_emb_025",
+    "hcg_absdiff_emb_026",
+    "hcg_absdiff_emb_027",
+    "hcg_absdiff_emb_028",
+    "hcg_absdiff_emb_029",
+    "hcg_absdiff_emb_030",
+    "hcg_absdiff_emb_031",
+    "hcg_absdiff_emb_032",
+    "hcg_absdiff_emb_033",
+    "hcg_absdiff_emb_034",
+    "hcg_absdiff_emb_035",
+    "hcg_absdiff_emb_036",
+    "hcg_absdiff_emb_037",
+    "hcg_absdiff_emb_038",
+    "hcg_absdiff_emb_039",
+    "hcg_absdiff_emb_040",
+    "hcg_absdiff_emb_041",
+    "hcg_absdiff_emb_042",
+    "hcg_absdiff_emb_043",
+    "hcg_absdiff_emb_044",
+    "hcg_absdiff_emb_045",
+    "hcg_absdiff_emb_046",
+    "hcg_absdiff_emb_047",
+    "hcg_absdiff_emb_048",
+    "hcg_absdiff_emb_049",
+    "hcg_absdiff_emb_050",
+    "hcg_absdiff_emb_051",
+    "hcg_absdiff_emb_052",
+    "hcg_absdiff_emb_053",
+    "hcg_absdiff_emb_054",
+    "hcg_absdiff_emb_055",
+    "hcg_absdiff_emb_056",
+    "hcg_absdiff_emb_057",
+    "hcg_absdiff_emb_058",
+    "hcg_absdiff_emb_059",
+    "hcg_absdiff_emb_060",
+    "hcg_absdiff_emb_061",
+    "hcg_absdiff_emb_062",
+    "hcg_absdiff_emb_063",
+    "hcg_prod_emb_000",
+    "hcg_prod_emb_001",
+    "hcg_prod_emb_002",
+    "hcg_prod_emb_003",
+    "hcg_prod_emb_004",
+    "hcg_prod_emb_005",
+    "hcg_prod_emb_006",
+    "hcg_prod_emb_007",
+    "hcg_prod_emb_008",
+    "hcg_prod_emb_009",
+    "hcg_prod_emb_010",
+    "hcg_prod_emb_011",
+    "hcg_prod_emb_012",
+    "hcg_prod_emb_013",
+    "hcg_prod_emb_014",
+    "hcg_prod_emb_015",
+    "hcg_prod_emb_016",
+    "hcg_prod_emb_017",
+    "hcg_prod_emb_018",
+    "hcg_prod_emb_019",
+    "hcg_prod_emb_020",
+    "hcg_prod_emb_021",
+    "hcg_prod_emb_022",
+    "hcg_prod_emb_023",
+    "hcg_prod_emb_024",
+    "hcg_prod_emb_025",
+    "hcg_prod_emb_026",
+    "hcg_prod_emb_027",
+    "hcg_prod_emb_028",
+    "hcg_prod_emb_029",
+    "hcg_prod_emb_030",
+    "hcg_prod_emb_031",
+    "hcg_prod_emb_032",
+    "hcg_prod_emb_033",
+    "hcg_prod_emb_034",
+    "hcg_prod_emb_035",
+    "hcg_prod_emb_036",
+    "hcg_prod_emb_037",
+    "hcg_prod_emb_038",
+    "hcg_prod_emb_039",
+    "hcg_prod_emb_040",
+    "hcg_prod_emb_041",
+    "hcg_prod_emb_042",
+    "hcg_prod_emb_043",
+    "hcg_prod_emb_044",
+    "hcg_prod_emb_045",
+    "hcg_prod_emb_046",
+    "hcg_prod_emb_047",
+    "hcg_prod_emb_048",
+    "hcg_prod_emb_049",
+    "hcg_prod_emb_050",
+    "hcg_prod_emb_051",
+    "hcg_prod_emb_052",
+    "hcg_prod_emb_053",
+    "hcg_prod_emb_054",
+    "hcg_prod_emb_055",
+    "hcg_prod_emb_056",
+    "hcg_prod_emb_057",
+    "hcg_prod_emb_058",
+    "hcg_prod_emb_059",
+    "hcg_prod_emb_060",
+    "hcg_prod_emb_061",
+    "hcg_prod_emb_062",
+    "hcg_prod_emb_063",
+    "hcg_src_emb_missing",
+    "hcg_dst_emb_missing"
+  ],
+  "removed_columns": [],
+  "checks": {
+    "A_file_exists": true,
+    "B_file_exists": true,
+    "C_file_exists": true,
+    "rows_non_empty": true,
+    "raw_features_non_empty": true,
+    "hcg_feature_count_is_258": true,
+    "hcg_embedding_feature_count_is_256": true,
+    "C_feature_count_matches": true,
+    "no_nan": true,
+    "no_inf": true,
+    "target_non_empty": true,
+    "split_non_empty": true
+  },
+  "overall_status": "PASS"
+}

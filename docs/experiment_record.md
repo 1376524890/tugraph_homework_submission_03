@@ -1117,6 +1117,172 @@ PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure_batch.py \
 | `num_walks` | `5` | 全量语料规模约 4.33M 行，磁盘占用可接受 |
 | Word2Vec `workers` | `0` | 由脚本自动解析为 `min(cpu_count, 8)`，当前服务器即 4 worker |
 
+## 2026-05-25 HCG 分类特征构建脚本 smoke
+
+本次只完成分类实验前的数据准备脚本和 smoke 验证，未启动全量特征构建。
+
+新增脚本：
+
+| 脚本 | 说明 |
+| --- | --- |
+| `scripts/build_hcg_classification_features.py` | 从原始 87 字段 CSV 和 HCG Endpoint embedding 构建 A/B/C 三份分类输入 parquet |
+| `scripts/check_hcg_classification_features.py` | 独立读取 A/B/C parquet，检查行数、record_id、target、split、HCG 维度和 NaN/Inf |
+
+100,000 行 smoke 构建命令：
+
+```bash
+PYTHONPATH=src python3 scripts/build_hcg_classification_features.py \
+  --raw-csv data/raw/Dataset-Unicauca-Version2-87Atts.csv \
+  --embedding data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet \
+  --output-dir data/features/hcg/classification/datasets_smoke \
+  --report data/features/hcg/classification/reports/hcg_classification_feature_build_smoke_report.md \
+  --json-report data/features/hcg/classification/reports/hcg_classification_feature_build_smoke_report.json \
+  --target protocol_name \
+  --max-rows 100000 \
+  --seed 20260525 \
+  --overwrite
+```
+
+smoke 构建结果：
+
+| 指标 | 值 |
+| --- | ---: |
+| 输出行数 | `100,000` |
+| target | `protocol_name` |
+| target 类别数 | `40` |
+| A raw 特征数 | `91` |
+| B HCG 特征数 | `258` |
+| B HCG embedding 维度 | `256` |
+| C 合并特征数 | `349` |
+| src embedding 缺失 | `0` |
+| dst embedding 缺失 | `137` |
+| 任一端点 embedding 缺失率 | `0.137%` |
+| NaN / Inf | `0 / 0` |
+| 构建耗时 | `23.83s` |
+
+smoke 校验命令：
+
+```bash
+PYTHONPATH=src python3 scripts/check_hcg_classification_features.py \
+  --dataset-dir data/features/hcg/classification/datasets_smoke \
+  --report data/features/hcg/classification/reports/hcg_classification_feature_check_smoke_report.md \
+  --json-report data/features/hcg/classification/reports/hcg_classification_feature_check_smoke_report.json \
+  --expected-hcg-dim 256
+```
+
+smoke 校验结果：
+
+| 检查项 | 结果 |
+| --- | --- |
+| A/B/C 文件存在 | PASS |
+| A/B/C 行数一致 | PASS |
+| record_id 唯一且顺序一致 | PASS |
+| target 一致 | PASS |
+| split 一致 | PASS |
+| B HCG embedding 维度为 256 | PASS |
+| C 同时包含 raw 和 hcg 特征 | PASS |
+| 无 NaN / Inf | PASS |
+| split 比例接近 70/10/20 | PASS |
+
+split 分布：
+
+| split | 比例 |
+| --- | ---: |
+| train | `69.876%` |
+| valid | `10.117%` |
+| test | `20.007%` |
+
+全量构建命令已由脚本支持，但本次按要求未运行全量。
+
+## 2026-05-25 HCG 分类特征全量构建与校验
+
+修复记录：
+
+- 初版全量构建时，CSV chunk 保留原始全局 index，部分 raw 数值列以 Series 形式参与 DataFrame 构造，和派生数组列发生 index 对齐，导致第二个 chunk 后出现 NaN。
+- 已修复 `scripts/build_hcg_classification_features.py`：每个 chunk 先 `reset_index(drop=True)`，raw 数值列转为 NumPy array 后再构造 DataFrame。
+- 已修复 `scripts/check_hcg_classification_features.py`：全量校验改为 pyarrow 分批读取 parquet，避免一次性载入 A/B/C 导致内存被系统杀掉。
+
+全量构建命令：
+
+```bash
+PYTHONPATH=src python scripts/build_hcg_classification_features.py \
+  --raw-csv data/raw/Dataset-Unicauca-Version2-87Atts.csv \
+  --embedding data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet \
+  --output-dir data/features/hcg/classification/datasets \
+  --report data/features/hcg/classification/reports/hcg_classification_feature_build_report.md \
+  --json-report data/features/hcg/classification/reports/hcg_classification_feature_build_report.json \
+  --target protocol_name \
+  --max-rows 0 \
+  --seed 20260525 \
+  --overwrite
+```
+
+全量构建结果：PASS。
+
+| 指标 | 值 |
+| --- | ---: |
+| 输出行数 | `3,577,296` |
+| target | `protocol_name` |
+| target 类别数 | `78` |
+| A raw 特征数 | `91` |
+| B HCG 特征数 | `258` |
+| B HCG embedding 维度 | `256` |
+| C 合并特征数 | `349` |
+| src embedding 缺失 | `0` |
+| dst embedding 缺失 | `5,574` |
+| 任一端点 embedding 缺失率 | `0.155816%` |
+| Timestamp 解析失败 | `0` |
+| NaN / Inf | `0 / 0` |
+| 构建耗时 | `786.24s` |
+
+输出文件大小：
+
+| 文件 | 大小 |
+| --- | ---: |
+| `data/features/hcg/classification/datasets/A_raw_flow_features.parquet` | `589,404,363` bytes |
+| `data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet` | `2,819,031,192` bytes |
+| `data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet` | `3,363,858,068` bytes |
+
+全量校验命令：
+
+```bash
+PYTHONPATH=src python scripts/check_hcg_classification_features.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --report data/features/hcg/classification/reports/hcg_classification_feature_check_report.md \
+  --json-report data/features/hcg/classification/reports/hcg_classification_feature_check_report.json \
+  --expected-hcg-dim 256
+```
+
+全量校验结果：PASS。
+
+| 检查项 | 结果 |
+| --- | --- |
+| A/B/C 文件存在 | PASS |
+| A/B/C 行数一致 | PASS |
+| record_id 唯一且顺序一致 | PASS |
+| target 一致 | PASS |
+| split 一致 | PASS |
+| A 包含 raw 特征 | PASS |
+| B HCG embedding 维度为 256 | PASS |
+| B 包含 missing flags | PASS |
+| C 同时包含 raw 和 hcg 特征 | PASS |
+| C raw 特征数等于 A | PASS |
+| C hcg 特征数等于 B | PASS |
+| 无 NaN / Inf | PASS |
+| target / split 非空 | PASS |
+| split 包含 train/valid/test | PASS |
+| split 比例接近 70/10/20 | PASS |
+
+split 分布：
+
+| split | 比例 |
+| --- | ---: |
+| train | `69.990574%` |
+| valid | `10.003086%` |
+| test | `20.006340%` |
+
+全量校验耗时 `58.61s`。当前三份 parquet 已可直接输入后续分类训练脚本；PCA、标准化、特征筛选和分类器训练仍留到下一阶段，并且应只在 train split 上 fit。
+
 ## 2026-05-24 实验设计调整：两阶段 HCG Embedding 分类流程
 
 根据当前实验目标，后续不再需要 F0-F4 baseline / 消融实验设定。不再生成 `F0`、`F1`、`F2`、`F3`、`F4` 数据集，也不再写 baseline 对比。后续只报告 HCG 图嵌入分类流程和分类效果。
