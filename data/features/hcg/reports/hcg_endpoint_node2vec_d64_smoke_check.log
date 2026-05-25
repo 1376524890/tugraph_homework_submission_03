@@ -1,0 +1,7 @@
+2026-05-25 11:01:36 INFO HCG embedding check started
+2026-05-25 11:01:36 INFO reading parquet: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/node2vec/hcg_endpoint_node2vec_d64_smoke.parquet size=72433480 bytes
+2026-05-25 11:01:36 INFO parquet loaded: rows=177761 columns=66
+2026-05-25 11:01:36 INFO reading id map: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
+2026-05-25 11:01:38 INFO id map loaded: 933050 tokens
+2026-05-25 11:01:38 INFO reports written: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_endpoint_node2vec_d64_smoke_check.md /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_endpoint_node2vec_d64_smoke_check.json
+2026-05-25 11:01:38 INFO HCG embedding check finished: status=PASS elapsed=1.95s

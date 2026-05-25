@@ -1,0 +1,22 @@
+2026-05-25 11:01:10 INFO HCG Word2Vec training started
+2026-05-25 11:01:10 INFO walks=/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt size=788255081 bytes
+2026-05-25 11:01:10 INFO id_map=/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv size=25860824 bytes
+2026-05-25 11:01:10 INFO parameters: vector_size=64 window=5 min_count=1 sg=1 negative=5 sample=0.0001 epochs=1 workers=8 seed=20260525 max_lines=100000
+2026-05-25 11:01:10 INFO reading id map: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
+2026-05-25 11:01:12 INFO id map loaded: 933050 tokens
+2026-05-25 11:01:12 INFO summarizing walks: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt max_lines=100000
+2026-05-25 11:01:12 INFO walk summary finished: lines=100000 unique_tokens=177761 avg_len=10.2092
+2026-05-25 11:01:12 INFO initializing Word2Vec model
+2026-05-25 11:01:12 INFO building Word2Vec vocabulary
+2026-05-25 11:01:14 INFO vocabulary built: vocab=177761 corpus_count=100000 corpus_total_words=1020923
+2026-05-25 11:01:14 INFO training Word2Vec
+2026-05-25 11:01:14 INFO training epoch 1/1 started
+2026-05-25 11:01:17 INFO training epoch 1/1 finished in 3.04s
+2026-05-25 11:01:17 INFO saving gensim model: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/node2vec/hcg_endpoint_node2vec_d64_smoke.model
+2026-05-25 11:01:18 INFO gensim model saved
+2026-05-25 11:01:18 INFO building embedding dataframe
+2026-05-25 11:01:18 INFO writing parquet: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/node2vec/hcg_endpoint_node2vec_d64_smoke.parquet rows=177761 dim=64
+2026-05-25 11:01:21 INFO parquet write finished
+2026-05-25 11:01:21 INFO computing nearest samples: 10
+2026-05-25 11:01:21 INFO reports written: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_word2vec_d64_smoke_report.md /home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/reports/hcg_word2vec_d64_smoke_report.json
+2026-05-25 11:01:21 INFO HCG Word2Vec training finished: status=PASS elapsed=11.05s

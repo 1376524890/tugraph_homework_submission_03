@@ -458,6 +458,138 @@ PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure_batch.py \
 
 它会把每批结果写到临时分片目录，最后合并成完整 walks 和 id map 文件。
 
+### 6.4 HCG Word2Vec Endpoint Embeddings
+
+全量 HCG Node2Vec walks 已作为 Word2Vec 语料使用：每条 walk 是一句 sentence，每个 `endpoint_id` 是一个 token。训练脚本只读取现有 walks 和 id map，不重新生成 walks，不重新导入 TuGraph。
+
+如果当前 Python 环境缺依赖，先安装：
+
+```bash
+conda run -n tugraph python -m pip install gensim numpy pandas pyarrow
+```
+
+默认输入：
+
+```text
+docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt
+docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
+```
+
+默认输出：
+
+```text
+data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet
+data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.model
+data/features/hcg/reports/hcg_word2vec_d64_report.md
+data/features/hcg/reports/hcg_word2vec_d64_report.json
+data/features/hcg/reports/hcg_word2vec_d64_report.log
+```
+
+默认训练参数：
+
+| 参数 | 值 |
+| --- | ---: |
+| `vector_size` | `64` |
+| `window` | `5` |
+| `min_count` | `1` |
+| `sg` | `1` |
+| `negative` | `5` |
+| `sample` | `1e-4` |
+| `epochs` | `5` |
+| `workers` | `min(cpu_count, 8)` |
+| `seed` | `20260525` |
+
+parquet schema：
+
+```text
+endpoint_id
+vid
+emb_000
+emb_001
+...
+emb_063
+```
+
+smoke test：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_word2vec_embeddings.py \
+  --walks docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt \
+  --id-map docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --output data/features/hcg/node2vec/hcg_endpoint_node2vec_d64_smoke.parquet \
+  --model-output data/features/hcg/node2vec/hcg_endpoint_node2vec_d64_smoke.model \
+  --report data/features/hcg/reports/hcg_word2vec_d64_smoke_report.md \
+  --json-report data/features/hcg/reports/hcg_word2vec_d64_smoke_report.json \
+  --vector-size 64 \
+  --window 5 \
+  --min-count 1 \
+  --sg 1 \
+  --negative 5 \
+  --sample 1e-4 \
+  --epochs 1 \
+  --workers 8 \
+  --seed 20260525 \
+  --max-lines 100000 \
+  --overwrite
+```
+
+校验 smoke 输出：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/check_hcg_embeddings.py \
+  --embeddings data/features/hcg/node2vec/hcg_endpoint_node2vec_d64_smoke.parquet \
+  --id-map docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --expected-dim 64 \
+  --expected-min-rows 1000 \
+  --report data/features/hcg/reports/hcg_endpoint_node2vec_d64_smoke_check.md \
+  --json-report data/features/hcg/reports/hcg_endpoint_node2vec_d64_smoke_check.json
+```
+
+全量训练命令：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_word2vec_embeddings.py \
+  --walks docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt \
+  --id-map docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --output data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet \
+  --model-output data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.model \
+  --report data/features/hcg/reports/hcg_word2vec_d64_report.md \
+  --json-report data/features/hcg/reports/hcg_word2vec_d64_report.json \
+  --vector-size 64 \
+  --window 5 \
+  --min-count 1 \
+  --sg 1 \
+  --negative 5 \
+  --sample 1e-4 \
+  --epochs 5 \
+  --workers 8 \
+  --seed 20260525 \
+  --overwrite
+```
+
+全量校验命令：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/check_hcg_embeddings.py \
+  --embeddings data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet \
+  --id-map docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --walks docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt \
+  --expected-dim 64 \
+  --expected-rows 933050 \
+  --report data/features/hcg/reports/hcg_endpoint_node2vec_d64_check.md \
+  --json-report data/features/hcg/reports/hcg_endpoint_node2vec_d64_check.json
+```
+
+下游分类任务 join 设计：embedding parquet 是 Endpoint 级特征，不是 flow 级特征。后续应使用 `endpoint_id` 分别与 flow 的 `src_endpoint`、`dst_endpoint` 对齐：
+
+```text
+src_emb = emb(src_endpoint)
+dst_emb = emb(dst_endpoint)
+flow_emb = concat(src_emb, dst_emb, abs(src_emb - dst_emb), src_emb * dst_emb)
+```
+
+若 endpoint embedding 维度为 `64`，则 `flow_emb` 维度为 `256`。
+
 ## 7. 查询视图
 
 查询视图从 TCG 的 `causes_full_parts` 派生，用于按 `delta_seconds`、关系类型和前驱/后继数量生成子图：

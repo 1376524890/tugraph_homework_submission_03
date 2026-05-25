@@ -1238,3 +1238,261 @@ vid,token
 ```
 
 结论：当前数据库中的 `hcg_node2vec_walk_py_batch` 已更新为符合阶段一要求的 Python 存储过程版本。后续全量阶段一应使用该存储过程生成加权 HCG walks，再训练 `data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet`。
+
+## 2026-05-25 HCG Node2Vec 全量 Walk 生成与检查
+
+已完成 HCG Node2Vec 全量 random walks 生成。本次使用数据库内 Python 存储过程 `hcg_node2vec_walk_py_batch`，直接读取 TuGraph 中已导入的 HCG 图，并按 `COMMUNICATES.flow_count` 的 `log1p` 权重进行采样。
+
+执行命令：
+
+```bash
+PYTHONPATH=src python3 scripts/run_hcg_node2vec_procedure_batch.py \
+  --batch-size 1000 \
+  --walk-length 20 \
+  --num-walks 5 \
+  --p 1.0 \
+  --q 1.0
+```
+
+本次运行参数和结果：
+
+| 项目 | 值 |
+| --- | ---: |
+| 起点选择 | 仅有出边的 `Endpoint` |
+| 起点数 | `865,950` |
+| `walk_length` | `20` |
+| `num_walks` | `5` |
+| `p` | `1.0` |
+| `q` | `1.0` |
+| 边权字段 | `flow_count` |
+| 权重变换 | `log1p` |
+| token 字段 | `endpoint_id` |
+| batch size | `1,000` |
+| batch 数 | `866` |
+| 总耗时 | `27,048.01` 秒 |
+| 总耗时 | `7.51` 小时 |
+| 平均吞吐 | `160.08` walks/s |
+
+输出文件：
+
+| 文件 | 规模 | 行数 |
+| --- | ---: | ---: |
+| `docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt` | `752M` | `4,329,750` |
+| `docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv` | `25M` | `933,051` |
+
+`id_map` 有效映射行数为 `933,050`，唯一 `vid` 为 `933,050`，唯一 token 为 `933,050`，空字段行数为 `0`。
+
+全量 walk 检查命令：
+
+```bash
+PYTHONPATH=src python3 scripts/check_walks_file.py \
+  --walks docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt \
+  --expected-min-lines 4329750 \
+  --min-walk-len 2 \
+  --report data/features/hcg/reports/hcg_node2vec_py_full_check.md \
+  --json-report data/features/hcg/reports/hcg_node2vec_py_full_check.json
+```
+
+检查结果：
+
+| 指标 | 值 |
+| --- | ---: |
+| walk 行数 | `4,329,750` |
+| 平均 walk 长度 | `10.0138` |
+| 最短 walk 长度 | `2` |
+| 最长 walk 长度 | `20` |
+| 唯一 token 数 | `933,050` |
+| 空行数 | `0` |
+| 长度为 1 的 walk 比例 | `0.000000` |
+
+检查项全部通过：
+
+- `line_count_at_least_expected`: PASS
+- `no_empty_lines`: PASS
+- `min_walk_len_ok`: PASS
+
+本次生成的检查报告：
+
+```text
+data/features/hcg/reports/hcg_node2vec_py_full_check.md
+data/features/hcg/reports/hcg_node2vec_py_full_check.json
+docs/hcg_node2vec_full_report.md
+```
+
+运行日志：
+
+```text
+logs/node2vec_batch_20260524_195009.log
+```
+
+结论：HCG 全量加权 Node2Vec walks 已可用于后续 Word2Vec / skip-gram 训练。平均 walk 长度小于 `20` 是有向图游走到无出边顶点后提前结束导致；本次检查确认没有空 walk，也没有长度为 `1` 的 walk。
+
+## 2026-05-25 HCG Word2Vec Endpoint Embedding 训练模块
+
+本次新增 HCG Word2Vec embedding 训练与独立校验模块，只消费既有 Node2Vec walks，不重新生成 walks，不重新导入 TuGraph，也不修改 HCG/TCG 构图逻辑。
+
+新增脚本：
+
+| 脚本 | 作用 |
+| --- | --- |
+| `scripts/train_hcg_word2vec_embeddings.py` | 流式读取 HCG walks，训练 gensim Word2Vec，导出 Endpoint embedding parquet/model/报告。 |
+| `scripts/check_hcg_embeddings.py` | 独立读取 parquet、id map、可选 walks，校验 schema、行数、唯一性、NaN/Inf 和 token 覆盖。 |
+
+运行环境依赖已安装到 conda `tugraph` 环境：
+
+```bash
+conda run -n tugraph python -m pip install pandas pyarrow -i https://mirrors.aliyun.com/pypi/simple
+```
+
+当前 `tugraph` 环境关键版本：
+
+| 包 | 版本 |
+| --- | --- |
+| `gensim` | `4.4.0` |
+| `numpy` | `2.4.6` |
+| `pandas` | `3.0.3` |
+| `pyarrow` | `24.0.0` |
+
+默认输入：
+
+```text
+docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt
+docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv
+```
+
+默认输出：
+
+```text
+data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet
+data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.model
+data/features/hcg/reports/hcg_word2vec_d64_report.md
+data/features/hcg/reports/hcg_word2vec_d64_report.json
+data/features/hcg/reports/hcg_word2vec_d64_report.log
+```
+
+默认训练参数：
+
+| 参数 | 值 |
+| --- | ---: |
+| `vector_size` | `64` |
+| `window` | `5` |
+| `min_count` | `1` |
+| `sg` | `1` |
+| `negative` | `5` |
+| `sample` | `1e-4` |
+| `epochs` | `5` |
+| `workers` | `min(cpu_count, 8)` |
+| `seed` | `20260525` |
+
+smoke test 命令：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_word2vec_embeddings.py \
+  --walks docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt \
+  --id-map docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --output data/features/hcg/node2vec/hcg_endpoint_node2vec_d64_smoke.parquet \
+  --model-output data/features/hcg/node2vec/hcg_endpoint_node2vec_d64_smoke.model \
+  --report data/features/hcg/reports/hcg_word2vec_d64_smoke_report.md \
+  --json-report data/features/hcg/reports/hcg_word2vec_d64_smoke_report.json \
+  --vector-size 64 \
+  --window 5 \
+  --min-count 1 \
+  --sg 1 \
+  --negative 5 \
+  --sample 1e-4 \
+  --epochs 1 \
+  --workers 8 \
+  --seed 20260525 \
+  --max-lines 100000 \
+  --overwrite
+```
+
+smoke test 结果：
+
+| 指标 | 值 |
+| --- | ---: |
+| walk 行数 | `100,000` |
+| walks 唯一 token 数 | `177,761` |
+| Word2Vec vocab token 数 | `177,761` |
+| parquet 输出行数 | `177,761` |
+| 向量维度 | `64` |
+| id map 覆盖率 | `100.000000%` |
+| NaN / Inf | `0 / 0` |
+| 训练耗时 | `11.05` 秒 |
+| 结果 | `PASS` |
+
+训练运行时已确认进度展示和日志记录正常：`Summarize walks`、`Build vocab`、`Train Word2Vec` 均显示 tqdm 进度；日志文件记录输入大小、参数、id map 加载、walk 统计、vocab 构建、epoch 起止、model/parquet 写出、报告写出和最终 PASS/FAIL。
+
+smoke 校验命令：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/check_hcg_embeddings.py \
+  --embeddings data/features/hcg/node2vec/hcg_endpoint_node2vec_d64_smoke.parquet \
+  --id-map docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --expected-dim 64 \
+  --expected-min-rows 1000 \
+  --report data/features/hcg/reports/hcg_endpoint_node2vec_d64_smoke_check.md \
+  --json-report data/features/hcg/reports/hcg_endpoint_node2vec_d64_smoke_check.json
+```
+
+smoke 校验结果：
+
+| 指标 | 值 |
+| --- | ---: |
+| parquet 行数 | `177,761` |
+| 列数 | `66` |
+| embedding 维度 | `64` |
+| endpoint_id 唯一数 | `177,761` |
+| id map token 数 | `933,050` |
+| embedding 不在 id map 的 token 数 | `0` |
+| NaN / Inf | `0 / 0` |
+| 结果 | `PASS` |
+
+全量训练命令已准备好，但本次按要求没有启动全量训练。按 smoke 吞吐粗略估计，`4,329,750` 行全量 walks、`epochs=5` 在当前机器上可能需要约 `35-60` 分钟；实际耗时会受全量 vocab、内存压力、磁盘写 parquet/model 和 gensim 多线程调度影响。
+
+全量训练命令：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_word2vec_embeddings.py \
+  --walks docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt \
+  --id-map docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --output data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet \
+  --model-output data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.model \
+  --report data/features/hcg/reports/hcg_word2vec_d64_report.md \
+  --json-report data/features/hcg/reports/hcg_word2vec_d64_report.json \
+  --vector-size 64 \
+  --window 5 \
+  --min-count 1 \
+  --sg 1 \
+  --negative 5 \
+  --sample 1e-4 \
+  --epochs 5 \
+  --workers 8 \
+  --seed 20260525 \
+  --overwrite
+```
+
+全量校验命令：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python scripts/check_hcg_embeddings.py \
+  --embeddings data/features/hcg/node2vec/hcg_endpoint_node2vec_d64.parquet \
+  --id-map docker/tugraph-tmp/hcg_node_id_map_node2vec_py_full.csv \
+  --walks docker/tugraph-tmp/hcg_walks_node2vec_py_full.txt \
+  --expected-dim 64 \
+  --expected-rows 933050 \
+  --report data/features/hcg/reports/hcg_endpoint_node2vec_d64_check.md \
+  --json-report data/features/hcg/reports/hcg_endpoint_node2vec_d64_check.json
+```
+
+下游 join 设计：embedding parquet 是 Endpoint 级特征，不是 flow 级特征。分类任务应通过 `endpoint_id` join 到 flow 的 `src_endpoint` 和 `dst_endpoint`：
+
+```text
+src_emb = emb(src_endpoint)
+dst_emb = emb(dst_endpoint)
+flow_emb = concat(src_emb, dst_emb, abs(src_emb - dst_emb), src_emb * dst_emb)
+```
+
+若 endpoint embedding 维度为 `64`，则 `flow_emb` 维度为 `256`。
+
+下一步：基于 `src_endpoint` 和 `dst_endpoint` 构造 flow 级分类特征。
