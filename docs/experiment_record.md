@@ -1988,3 +1988,98 @@ PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
   --seed 20260525 \
   --resume
 ```
+
+## 2026-05-25 无 TuGraph 机器迁移训练包
+
+分类训练阶段只读取已经生成的 parquet，不访问 TuGraph、Docker、node2vec walks 或 Word2Vec model。因此迁移到另一台没有 TuGraph 服务的机器时，必须迁移的是训练输入和 Python 代码，而不是图数据库运行时。
+
+必须数据：
+
+| 数据 | 用途 | 大小 |
+| --- | --- | ---: |
+| `data/features/hcg/classification/datasets/A_raw_flow_features.parquet` | A 组 raw 特征训练 | `563M` |
+| `data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet` | B 组 HCG embedding 特征训练 | `2.7G` |
+| `data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet` | C 组融合特征训练 | `3.2G` |
+
+必须代码：
+
+```text
+scripts/train_hcg_classifiers.py
+scripts/check_hcg_classifier_results.py
+scripts/render_hcg_classification_figures.py
+src/tugraph_homework/
+```
+
+不需要迁移：
+
+```text
+docker/tugraph-data/
+docker/tugraph-import/
+docker/tugraph-logs/
+docker/tugraph-tmp/
+data/raw/
+data/processed/
+data/features/hcg/node2vec/
+procedures/
+build/
+```
+
+新增一键准备脚本：
+
+```text
+scripts/prepare_hcg_classification_training_bundle.py
+```
+
+默认准备目录：
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
+  --output-dir data/exports/hcg_classification_training_bundle \
+  --feature-groups A,B,C \
+  --force
+```
+
+如果只想在本机检查 bundle 结构并避免重复占用数据空间，可使用 hardlink：
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
+  --output-dir data/exports/hcg_classification_training_bundle \
+  --feature-groups A,B,C \
+  --link \
+  --force
+```
+
+如果需要单文件传输：
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
+  --output-dir data/exports/hcg_classification_training_bundle \
+  --feature-groups A,B,C \
+  --archive \
+  --compress none \
+  --force
+```
+
+说明：A/B/C parquet 合计约 `6.4G`，parquet 本身已经压缩，继续 gzip 通常收益较小且耗时明显增加。跨机器迁移建议使用普通 `.tar`、移动硬盘或 `rsync`。
+
+bundle 内会生成：
+
+```text
+README_BUNDLE.md
+requirements-classification.txt
+bundle_manifest.json
+```
+
+其中 `bundle_manifest.json` 记录所有文件大小和 SHA-256，用于传输后核对。
+
+已验证：
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
+  --output-dir data/exports/hcg_classification_training_bundle_test \
+  --feature-groups A \
+  --link \
+  --force
+```
+
+验证结果：A-only bundle 成功生成，包含 `15` 个文件，manifest 显示大小约 `0.55 GiB`。测试目录已清理。

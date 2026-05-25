@@ -740,6 +740,87 @@ PYTHONPATH=src conda run -n tugraph python scripts/render_hcg_classification_fig
 
 因此在当前机器上，B/C 全量训练默认会被内存保护跳过；A 组部分模型也接近或超过安全阈值。若要完整跑 B/C，建议换到至少 32 GiB 内存机器，C 组 LightGBM 更稳妥的配置是 48-64 GiB。
 
+### 7.1 迁移到无 TuGraph 机器训练
+
+分类训练阶段不需要 TuGraph 服务器。目标机器只需要 Python 环境、训练脚本和已经生成好的 A/B/C parquet。
+
+必须迁移：
+
+| 路径 | 是否必须 | 说明 |
+| --- | --- | --- |
+| `data/features/hcg/classification/datasets/A_raw_flow_features.parquet` | A 组需要 | raw flow 特征。 |
+| `data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet` | B 组需要 | HCG embedding flow 特征。 |
+| `data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet` | C 组需要 | raw + HCG 融合特征。 |
+| `scripts/train_hcg_classifiers.py` | 必须 | 分类训练入口。 |
+| `scripts/check_hcg_classifier_results.py` | 建议 | 结果完整性检查。 |
+| `scripts/render_hcg_classification_figures.py` | 建议 | 单独重画图。 |
+| `src/tugraph_homework/` | 必须 | 共享工具和监控代码。 |
+| `README.md`、`docs/experiment_record.md` | 建议 | 复现实验说明。 |
+
+不需要迁移：
+
+```text
+docker/tugraph-data/
+docker/tugraph-import/
+docker/tugraph-logs/
+docker/tugraph-tmp/
+data/raw/
+data/processed/
+data/features/hcg/node2vec/
+procedures/
+build/
+```
+
+一键准备迁移目录：
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
+  --output-dir data/exports/hcg_classification_training_bundle \
+  --feature-groups A,B,C \
+  --force
+```
+
+如果只是同一块磁盘上先检查目录结构，可用 hardlink 避免重复占用 6GB 数据：
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
+  --output-dir data/exports/hcg_classification_training_bundle \
+  --feature-groups A,B,C \
+  --link \
+  --force
+```
+
+需要生成 tar 包：
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
+  --output-dir data/exports/hcg_classification_training_bundle \
+  --feature-groups A,B,C \
+  --archive \
+  --compress none \
+  --force
+```
+
+全量 A/B/C bundle 约 `6.4 GiB`，主要由三份 parquet 构成。parquet 已压缩，`--compress gz` 通常节省有限且耗时更长，跨机器传输建议优先使用普通 `.tar` 或 `rsync`。
+
+目标机器上解包后：
+
+```bash
+cd hcg_classification_training_bundle
+python3 -m pip install -r requirements-classification.txt
+PYTHONPATH=src python3 scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
 ## 8. 查询视图
 
 查询视图从 TCG 的 `causes_full_parts` 派生，用于按 `delta_seconds`、关系类型和前驱/后继数量生成子图：
