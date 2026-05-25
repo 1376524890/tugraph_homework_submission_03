@@ -2228,3 +2228,36 @@ git lfs pull
 - 两台机器可 SSH 互通时，优先使用 `rsync`。
 - 不能 SSH 直连时，使用 `rclone` 或对象存储中转。
 - 只有在明确 LFS 配额足够且仓库私有时，才使用 Git LFS。
+
+## 2026-05-25 README 远程迁移命令匿名化
+
+根据安全要求，已将 `README.md` 中迁移命令示例里的真实远程用户名、服务器地址、SSH 端口和目标目录改为占位符，避免仓库文档泄露连接信息。
+
+当前 README 使用以下占位符：
+
+```text
+<remote_user>
+<remote_host>
+<remote_port>
+<remote_project_dir>
+```
+
+迁移命令模板仍保留完整结构，例如：
+
+```bash
+rsync -avh --progress \
+  -e "ssh -p <remote_port>" \
+  data/exports/hcg_classification_training_bundle.tar \
+  <remote_user>@<remote_host>:<remote_project_dir>/
+```
+
+以及：
+
+```bash
+ssh -p <remote_port> <remote_user>@<remote_host>
+cd <remote_project_dir>
+tar -xf hcg_classification_training_bundle.tar
+rsync -avh --progress hcg_classification_training_bundle/ ./
+```
+
+已检查 `README.md`、`docs/experiment_record.md` 和 `scripts/`，未发现真实远程用户名、服务器地址或 SSH 端口残留。
