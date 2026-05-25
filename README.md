@@ -821,6 +821,110 @@ PYTHONPATH=src python3 scripts/train_hcg_classifiers.py \
   --resume
 ```
 
+目标机器示例使用占位符，避免在文档中暴露真实用户名、地址和端口：
+
+```text
+<remote_user>@<remote_host> -p <remote_port>
+<remote_project_dir>
+```
+
+本机准备 tar：
+
+```bash
+cd /home/marktom/tugraph/tugraph_homework_submission_03
+
+PYTHONPATH=src python3 scripts/prepare_hcg_classification_training_bundle.py \
+  --output-dir data/exports/hcg_classification_training_bundle \
+  --feature-groups A,B,C \
+  --archive \
+  --compress none \
+  --force
+```
+
+传输到目标项目目录：
+
+```bash
+rsync -avh --progress \
+  -e "ssh -p <remote_port>" \
+  data/exports/hcg_classification_training_bundle.tar \
+  <remote_user>@<remote_host>:<remote_project_dir>/
+```
+
+登录目标机器并解包：
+
+```bash
+ssh -p <remote_port> <remote_user>@<remote_host>
+
+cd <remote_project_dir>
+tar -xf hcg_classification_training_bundle.tar
+rsync -avh --progress hcg_classification_training_bundle/ ./
+```
+
+安装依赖：
+
+```bash
+cd <remote_project_dir>
+python3 -m pip install -r requirements.txt
+```
+
+确认数据到位：
+
+```bash
+ls -lh data/features/hcg/classification/datasets/
+```
+
+可选：迁移后重新校验 A/B/C parquet：
+
+```bash
+PYTHONPATH=src python3 scripts/check_hcg_classification_features.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --report data/features/hcg/classification/reports/hcg_classification_feature_check_after_transfer.md \
+  --json-report data/features/hcg/classification/reports/hcg_classification_feature_check_after_transfer.json
+```
+
+先跑 smoke：
+
+```bash
+PYTHONPATH=src python3 scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results_smoke \
+  --runs-dir runs/hcg_classification_smoke \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --sample-train 100000 \
+  --sample-valid 20000 \
+  --sample-test 20000 \
+  --knn-train-sample 50000 \
+  --knn-test-sample 20000 \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+正式训练：
+
+```bash
+PYTHONPATH=src python3 scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+确认同步无误后可删除目标机器上的传输包和临时解包目录：
+
+```bash
+rm -rf hcg_classification_training_bundle hcg_classification_training_bundle.tar
+```
+
 ## 8. 查询视图
 
 查询视图从 TCG 的 `causes_full_parts` 派生，用于按 `delta_seconds`、关系类型和前驱/后继数量生成子图：
