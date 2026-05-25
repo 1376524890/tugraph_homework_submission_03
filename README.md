@@ -730,17 +730,67 @@ PYTHONPATH=src conda run -n tugraph python scripts/render_hcg_classification_fig
 | `--no-memory-guard` | 关闭保护 | 仅在确认机器内存足够时使用。 |
 | `--no-isolate-tasks` | 关闭隔离 | 仅用于调试；正式长跑不建议关闭。 |
 
-当前 4 核、7.7 GiB 内存机器的全量峰值估算：
+### 7.1 GPU 加速（可选）
 
-| 组别 | X float32 矩阵 | Logistic | Decision Tree | LightGBM | KNN sample |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| A | 1.21 GiB | 6.12 GiB | 5.64 GiB | 9.09 GiB | 5.40 GiB |
-| B | 3.44 GiB | 13.69 GiB | 12.31 GiB | 18.44 GiB | 11.63 GiB |
-| C | 4.65 GiB | 17.81 GiB | 15.95 GiB | 23.53 GiB | 15.02 GiB |
+训练脚本默认 **纯 CPU 运行**，所有 GPU 加速均为 opt-in（需显式指定 CLI 参数）。不传 GPU 参数时行为与旧版完全一致。
 
-因此在当前机器上，B/C 全量训练默认会被内存保护跳过；A 组部分模型也接近或超过安全阈值。若要完整跑 B/C，建议换到至少 32 GiB 内存机器，C 组 LightGBM 更稳妥的配置是 48-64 GiB。
+**GPU 前提**：NVIDIA GPU + CUDA 驱动。当前开发环境为 2x RTX 4090 (24GB)，CUDA 13.0。
 
-### 7.1 迁移到无 TuGraph 机器训练
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--lightgbm-device cpu` | `cpu` | `cuda` 需从源码编译 LightGBM（见 experiment_record.md） |
+| `--logistic-backend sklearn` | `sklearn` | `pytorch` 使用 GPU tensor + CrossEntropyLoss |
+| `--knn-backend sklearn` | `sklearn` | `cuml` 为实验性 GPU 后端（当前环境 ABI 待修复） |
+| `--logistic-pytorch-lr 0.01` | `0.01` | PyTorch 后端学习率 |
+
+**GPU 加速版全量训练命令**：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python3 scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --no-memory-guard \
+  --lightgbm-device cuda \
+  --logistic-backend pytorch \
+  --logistic-batch-size 200000 \
+  --knn-train-sample 300000 \
+  --knn-test-sample 100000 \
+  --tensorboard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+GPU 加速效果（RTX 4090 vs 24核 CPU 估算）：
+
+| 模型 | CPU 估算 | GPU 估算 | 加速比 |
+| --- | ---: | ---: | ---: |
+| LightGBM | ~2h | ~15min | **~8x** |
+| Logistic SGD | ~20min | ~5min | ~4x |
+| KNN | ~1h (采样30万) | ~3min (全量) | ~20x |
+| 端到端总计 | ~3.6h | ~0.5h | **~7x** |
+
+**纯 CPU 全量训练**（不指定任何 GPU 参数，与旧版完全兼容）：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python3 scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --no-memory-guard \
+  --progress \
+  --render-figures \
+  --seed 20260525 \
+  --resume
+```
+
+### 7.2 迁移到无 TuGraph 机器训练
 
 分类训练阶段不需要 TuGraph 服务器。目标机器只需要 Python 环境、训练脚本和已经生成好的 A/B/C parquet。
 

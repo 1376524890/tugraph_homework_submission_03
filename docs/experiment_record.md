@@ -2429,11 +2429,34 @@ conda install -n tugraph -c rapidsai -c conda-forge cuml=26.04.00
 | **CuPy 13.6.0** | ✅ 可用 | GPU 数组/Numpy 替代 |
 | **cuML** | ❌ 不可用 | ABI 兼容问题 |
 
-### 全量训练 GPU 命令（最终版）
+### 训练脚本 GPU 适配
+
+`scripts/train_hcg_classifiers.py` 新增以下 CLI 参数：
+
+| 参数 | 默认值 | 选项 | 说明 |
+| --- | --- | --- | --- |
+| `--lightgbm-device` | `cpu` | `cpu`, `cuda` | LightGBM 设备选择 |
+| `--logistic-backend` | `sklearn` | `sklearn`, `pytorch` | Logistic 回归后端 |
+| `--knn-backend` | `sklearn` | `sklearn`, `cuml` | KNN 后端 (cuml 实验性) |
+| `--logistic-pytorch-lr` | `0.01` | float | PyTorch Logistic 学习率 |
+
+代码改动要点：
+
+- **LightGBM**: `LGBMClassifier(device=args.lightgbm_device)`，CUDA 编译版本验证通过。
+- **Logistic PyTorch**: 新增 `train_logistic_pytorch()` 函数，GPU tensor + CrossEntropyLoss + SGD，模型保存为 `model.pkl` (torch.save)。
+- **Logistic sklearn**: 保留 `train_logistic()` 不变，默认行为。
+- **KNN cuML**: 新增 `_train_knn_cuml()` 函数，GPU cuKNN，不使用采样跑全量数据，模型保存为 `model.pkl` (joblib)。
+- **KNN sklearn**: 保留原有采样逻辑，默认行为。
+- **save_outputs**: 根据 `extra` 中的 `logistic_backend` / `knn_backend` 选择正确的序列化方式。
+
+验证结果：LightGBM CUDA 和 PyTorch CUDA 均通过合成数据 smoke test。
+
+### 全量训练 GPU 命令
 
 ```bash
 cd /home/codeserver/tugraph_homework_submission_03
 
+# GPU 加速版（推荐）
 PYTHONPATH=src conda run -n tugraph python3 scripts/train_hcg_classifiers.py \
   --dataset-dir data/features/hcg/classification/datasets \
   --output-dir data/features/hcg/classification/results \
@@ -2441,6 +2464,9 @@ PYTHONPATH=src conda run -n tugraph python3 scripts/train_hcg_classifiers.py \
   --feature-groups A,B,C \
   --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
   --no-memory-guard \
+  --lightgbm-device cuda \
+  --logistic-backend pytorch \
+  --logistic-pytorch-lr 0.01 \
   --logistic-batch-size 200000 \
   --knn-train-sample 300000 \
   --knn-test-sample 100000 \
@@ -2451,25 +2477,11 @@ PYTHONPATH=src conda run -n tugraph python3 scripts/train_hcg_classifiers.py \
   --resume
 ```
 
-注意：LightGBM 当前使用 CPU 模式。如需 GPU，需在 `train_lightgbm()` 的
-`LGBMClassifier` 构造中添加 `device='cuda'` 参数。当前训练脚本未包含该参数，
-后续可添加 `--lightgbm-device` 命令行参数来选择 'cpu' 或 'cuda'。
+注意：`--knn-backend cuml` 暂不可用（cuML C++ ABI 兼容问题），KNN 仍用 sklearn CPU + 采样。
+cuML ABI 修复后可加 `--knn-backend cuml` 取消采样跑全量 KNN。
 
 ### 目录清理
 
-迁移 bundle 目录 `hcg_classification_training_bundle/` 和 `.tar` 文件为传输中间产物，
-已确认 parquet 数据已部署到 `data/features/hcg/classification/datasets/`，bundle 内的
-`scripts/`、`src/`、`docs/` 与主项目完全重复，可安全删除。
-
-清理步骤：
-```bash
-# 1. 确保 parquet 数据已在目标位置（非 symlink）
-cp -L data/features/hcg/classification/datasets/*.parquet data/features/hcg/classification/datasets/
-
-# 2. 删除 bundle 和 tar
-rm -rf hcg_classification_training_bundle/
-rm hcg_classification_training_bundle.tar
-
-# 3. 确认 .gitignore 已包含大数据文件的排除
-# data/features/hcg/classification/datasets*/ 已配置
-```
+迁移 bundle 目录 `hcg_classification_training_bundle/` 和 `.tar` 文件为传输中间产物。
+数据从远程 rsync 拉取后放入 `data/features/hcg/classification/datasets/`。
+bundle 已删除，tar 已删除。`.gitignore` 已配置排除 `datasets*/`。

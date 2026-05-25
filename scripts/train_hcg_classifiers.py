@@ -122,6 +122,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--logistic-batch-size", type=int, default=100_000)
     parser.add_argument("--lightgbm-n-estimators", type=int, default=3000)
     parser.add_argument("--lightgbm-early-stopping-rounds", type=int, default=100)
+    parser.add_argument("--lightgbm-device", choices=["cpu", "cuda"], default="cpu",
+                        help="LightGBM device: 'cpu' or 'cuda' (requires CUDA build).")
+    parser.add_argument("--logistic-backend", choices=["sklearn", "pytorch"], default="sklearn",
+                        help="Logistic regression backend: 'sklearn' (SGDClassifier) or 'pytorch' (GPU).")
+    parser.add_argument("--knn-backend", choices=["sklearn", "cuml"], default="sklearn",
+                        help="KNN backend: 'sklearn' or 'cuml' (GPU, experimental).")
+    parser.add_argument("--logistic-pytorch-lr", type=float, default=0.01,
+                        help="Learning rate for PyTorch logistic backend.")
     parser.add_argument("--isolate-tasks", dest="isolate_tasks", action="store_true", default=True)
     parser.add_argument("--no-isolate-tasks", dest="isolate_tasks", action="store_false")
     parser.add_argument("--memory-guard", dest="memory_guard", action="store_true", default=True)
@@ -137,16 +145,22 @@ def resolve_path(path: Path) -> Path:
     return path if path.is_absolute() else ROOT / path
 
 
-def require_dependencies(model_names: list[str]) -> None:
+def require_dependencies(model_names: list[str], args: argparse.Namespace) -> None:
     missing = []
     for module in ["sklearn", "joblib"]:
         if importlib.util.find_spec(module) is None:
             missing.append(module)
     if "lightgbm" in model_names and importlib.util.find_spec("lightgbm") is None:
         missing.append("lightgbm")
+    if args.logistic_backend == "pytorch" and "logistic_sgd" in model_names:
+        if importlib.util.find_spec("torch") is None:
+            missing.append("torch (required for --logistic-backend pytorch)")
+    if args.knn_backend == "cuml" and "knn_sample" in model_names:
+        if importlib.util.find_spec("cuml") is None:
+            missing.append("cuml (required for --knn-backend cuml)")
     if missing:
-        install = "python3 -m pip install scikit-learn joblib lightgbm matplotlib"
-        raise RuntimeError(f"Missing required training dependencies: {', '.join(sorted(set(missing)))}. Install with: {install}")
+        raise RuntimeError(f"Missing required training dependencies: {', '.join(sorted(set(missing)))}. "
+                           f"Install with: conda/pip install <package>")
 
 
 def parse_csv_list(value: str) -> list[str]:
@@ -608,6 +622,99 @@ def train_logistic(
     return clf, scaler, y_valid_pred, y_test_pred, train_seconds, inference_seconds, pd.DataFrame(history), {"sampled": False}
 
 
+def train_logistic_pytorch(
+    xy: dict[str, Any],
+    args: argparse.Namespace,
+    writer: Any,
+    event_logger: EventLogger,
+    tid: str,
+    feature_group: str,
+    status_board: StatusBoard,
+) -> tuple[Any, Any, np.ndarray, np.ndarray, float, float, pd.DataFrame, dict[str, Any]]:
+    import torch
+    from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+    from sklearn.preprocessing import StandardScaler
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    scaler = StandardScaler()
+    train_started = time.perf_counter()
+    X_train = torch.tensor(scaler.fit_transform(xy["X_train"]), dtype=torch.float32, device=device)
+    y_train = torch.tensor(xy["y_train"], dtype=torch.long, device=device)
+    X_valid = torch.tensor(scaler.transform(xy["X_valid"]), dtype=torch.float32, device=device)
+    y_valid_np = xy["y_valid"]
+    X_test = torch.tensor(scaler.transform(xy["X_test"]), dtype=torch.float32, device=device)
+
+    n_classes = len(xy["classes"])
+    linear = torch.nn.Linear(xy["X_train"].shape[1], n_classes, device=device)
+    optimizer = torch.optim.SGD(linear.parameters(), lr=args.logistic_pytorch_lr)
+    loss_fn = torch.nn.CrossEntropyLoss()
+
+    history: list[dict[str, Any]] = []
+    batch_size = args.logistic_batch_size
+    n_samples = len(X_train)
+
+    for epoch in range(1, args.logistic_max_epochs + 1):
+        epoch_started = time.perf_counter()
+        perm = torch.randperm(n_samples, device=device)
+        linear.train()
+        for i in range(0, n_samples, batch_size):
+            idx = perm[i : i + batch_size]
+            optimizer.zero_grad()
+            loss = loss_fn(linear(X_train[idx]), y_train[idx])
+            loss.backward()
+            optimizer.step()
+
+        linear.eval()
+        with torch.no_grad():
+            valid_logits = linear(X_valid)
+            valid_pred = torch.argmax(valid_logits, dim=1).cpu().numpy()
+        macro = precision_recall_fscore_support(y_valid_np, valid_pred, average="macro", zero_division=0)
+        weighted = precision_recall_fscore_support(y_valid_np, valid_pred, average="weighted", zero_division=0)
+        row = {
+            "iteration": epoch,
+            "epoch": epoch,
+            "valid_accuracy": float(accuracy_score(y_valid_np, valid_pred)),
+            "valid_macro_f1": float(macro[2]),
+            "valid_weighted_f1": float(weighted[2]),
+            "valid_macro_recall": float(macro[1]),
+            "epoch_seconds": elapsed(epoch_started),
+        }
+        history.append(row)
+        if writer is not None:
+            writer.add_scalar("valid/accuracy", row["valid_accuracy"], epoch)
+            writer.add_scalar("valid/macro_f1", row["valid_macro_f1"], epoch)
+            writer.add_scalar("valid/weighted_f1", row["valid_weighted_f1"], epoch)
+            writer.add_scalar("valid/macro_recall", row["valid_macro_recall"], epoch)
+            writer.add_scalar("time/epoch_seconds", row["epoch_seconds"], epoch)
+        event_logger.emit(
+            "iteration_update",
+            task_id=tid, feature_group=feature_group, model_name="logistic_sgd",
+            stage="train", status="running",
+            current_step=epoch, total_steps=args.logistic_max_epochs,
+            metrics={"valid_macro_f1": row["valid_macro_f1"], "valid_weighted_f1": row["valid_weighted_f1"]},
+        )
+        status_board.update_current(tid, "train", {"valid_macro_f1": row["valid_macro_f1"], "valid_weighted_f1": row["valid_weighted_f1"]})
+
+    train_seconds = elapsed(train_started)
+    pred_started = time.perf_counter()
+    with torch.no_grad():
+        y_valid_pred = torch.argmax(linear(X_valid), dim=1).cpu().numpy()
+        y_test_pred = torch.argmax(linear(X_test), dim=1).cpu().numpy()
+    inference_seconds = elapsed(pred_started)
+
+    # Wrap linear layer as a sklearn-compatible object for save_outputs
+    class _TorchWrapper:
+        def __init__(self, model, scaler, classes):
+            self.model = model
+            self.scaler = scaler
+            self.classes_ = classes
+    wrapped = _TorchWrapper(linear, scaler, np.array(xy["classes"]))
+
+    return wrapped, scaler, y_valid_pred, y_test_pred, train_seconds, inference_seconds, pd.DataFrame(history), {
+        "sampled": False, "logistic_backend": "pytorch", "device": str(device),
+    }
+
+
 def train_lightgbm(
     xy: dict[str, Any],
     feature_cols: list[str],
@@ -633,6 +740,8 @@ def train_lightgbm(
         reg_lambda=1.0,
         random_state=args.seed,
         n_jobs=-1,
+        device=args.lightgbm_device,
+        verbose=-1,
     )
     evals_result: dict[str, Any] = {}
     history: list[dict[str, Any]] = []
@@ -698,6 +807,39 @@ def train_lightgbm(
     return clf, y_valid_pred, y_test_pred, train_seconds, inference_seconds, pd.DataFrame(history), {"sampled": False}, gain, split
 
 
+def _train_knn_cuml(
+    xy: dict[str, Any],
+    args: argparse.Namespace,
+    event_logger: EventLogger,
+    tid: str,
+    feature_group: str,
+    status_board: StatusBoard,
+) -> tuple[Any, Any, np.ndarray, np.ndarray, float, float, pd.DataFrame | None, dict[str, Any]]:
+    """GPU KNN via cuML. Uses full data — no sampling needed."""
+    from cuml.neighbors import KNeighborsClassifier as cuKNN
+    from sklearn.preprocessing import StandardScaler
+
+    scaler = StandardScaler()
+    train_started = time.perf_counter()
+    X_train = scaler.fit_transform(xy["X_train"]).astype(np.float32)
+    y_train = xy["y_train"].astype(np.int32)
+    clf = cuKNN(n_neighbors=5, metric="euclidean")
+    clf.fit(X_train, y_train)
+    train_seconds = elapsed(train_started)
+
+    pred_started = time.perf_counter()
+    X_valid = scaler.transform(xy["X_valid"]).astype(np.float32)
+    X_test = scaler.transform(xy["X_test"]).astype(np.float32)
+    y_valid_pred = clf.predict(X_valid).astype(np.int64)
+    y_test_pred = clf.predict(X_test).astype(np.int64)
+    inference_seconds = elapsed(pred_started)
+
+    return clf, scaler, y_valid_pred, y_test_pred, train_seconds, inference_seconds, None, {
+        "sampled": False, "knn_backend": "cuml",
+        "knn_train_sample": len(y_train), "knn_test_sample": len(xy["y_test"]),
+    }
+
+
 def train_knn_sample(
     xy: dict[str, Any],
     args: argparse.Namespace,
@@ -706,8 +848,12 @@ def train_knn_sample(
     feature_group: str,
     status_board: StatusBoard,
 ) -> tuple[Any, Any, np.ndarray, np.ndarray, float, float, pd.DataFrame | None, dict[str, Any]]:
-    from sklearn.neighbors import KNeighborsClassifier
     from sklearn.preprocessing import StandardScaler
+
+    if args.knn_backend == "cuml":
+        return _train_knn_cuml(xy, args, event_logger, tid, feature_group, status_board)
+
+    from sklearn.neighbors import KNeighborsClassifier
 
     if not args.allow_full_knn and (args.knn_train_sample <= 0 or args.knn_test_sample <= 0):
         raise ValueError("KNN requires sampling unless --allow-full-knn is explicitly set.")
@@ -792,8 +938,12 @@ def save_outputs(
     test_metrics, report, matrix = classification_metrics(xy["y_test"], y_test_pred, classes)
     directory.mkdir(parents=True, exist_ok=True)
     model_path = directory / ("lightgbm_model.txt" if model_name == "lightgbm" else "model.pkl")
+    extra_backend = extra.get("logistic_backend", "") or extra.get("knn_backend", "")
     if model_name == "lightgbm":
         model.booster_.save_model(str(model_path))
+    elif extra_backend == "pytorch":
+        import torch
+        torch.save({"model_state_dict": model.model.state_dict(), "scaler": scaler}, str(model_path))
     else:
         joblib.dump(model, model_path)
     if scaler is not None:
@@ -944,9 +1094,14 @@ def run_task(
         elif model_name == "decision_tree":
             model, y_valid_pred, y_test_pred, train_seconds, inference_seconds, eval_history, extra = train_decision_tree(model_name, xy, args.seed)
         elif model_name == "logistic_sgd":
-            model, scaler, y_valid_pred, y_test_pred, train_seconds, inference_seconds, eval_history, extra = train_logistic(
-                xy, args, writer, event_logger, tid, feature_group, status_board
-            )
+            if args.logistic_backend == "pytorch":
+                model, scaler, y_valid_pred, y_test_pred, train_seconds, inference_seconds, eval_history, extra = train_logistic_pytorch(
+                    xy, args, writer, event_logger, tid, feature_group, status_board
+                )
+            else:
+                model, scaler, y_valid_pred, y_test_pred, train_seconds, inference_seconds, eval_history, extra = train_logistic(
+                    xy, args, writer, event_logger, tid, feature_group, status_board
+                )
         elif model_name == "lightgbm":
             model, y_valid_pred, y_test_pred, train_seconds, inference_seconds, eval_history, extra, gain_importance, split_importance = train_lightgbm(
                 xy, feature_cols, args, writer, event_logger, tid, feature_group, status_board
@@ -1288,7 +1443,7 @@ def main() -> int:
     bad_groups = [group for group in feature_groups if group not in DATASET_FILES]
     if bad_groups:
         raise ValueError(f"Unknown feature groups: {', '.join(bad_groups)}")
-    require_dependencies(models)
+    require_dependencies(models, args)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     worker_mode = bool(args.worker_feature_group or args.worker_model)
     if worker_mode:
