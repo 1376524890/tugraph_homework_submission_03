@@ -2485,3 +2485,93 @@ cuML ABI 修复后可加 `--knn-backend cuml` 取消采样跑全量 KNN。
 迁移 bundle 目录 `hcg_classification_training_bundle/` 和 `.tar` 文件为传输中间产物。
 数据从远程 rsync 拉取后放入 `data/features/hcg/classification/datasets/`。
 bundle 已删除，tar 已删除。`.gitignore` 已配置排除 `datasets*/`。
+
+## 2026-05-26 本机采样分类结果检查与归档
+
+在 `marktom` 本机低内存环境中检查了当前 `data/features/hcg/classification/results/`
+下的采样/限量分类实验结果。该结果目录不是最终全量 A/B/C 分类结论，而是一次
+本机资源受限运行的中间产物。
+
+### 结果完整性检查
+
+检查命令：
+
+```bash
+PYTHONPATH=src python3 scripts/check_hcg_classifier_results.py \
+  --results-dir data/features/hcg/classification/results \
+  --expected-feature-groups A,B,C \
+  --expected-models dummy_most_frequent,dummy_stratified,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --allow-failed \
+  --report data/features/hcg/classification/results/check_report.md \
+  --json-report data/features/hcg/classification/results/check_report.json
+```
+
+检查结果：PASS。含义是已完成任务产物完整，失败或跳过任务均有明确
+`task_status.json` 记录；并不表示所有模型都成功训练。
+
+本次归档位置：
+
+```text
+data/features/hcg/classification/archives/20260526_sampling_local_oom/
+data/features/hcg/classification/archives/20260526_sampling_local_oom/ANALYSIS.md
+```
+
+Git 中只保留精简分析报告 `ANALYSIS.md` 和本实验记录；完整 `results_snapshot/`
+目录约 `76M`，仅作为本地快照保留，并通过 `.gitignore` 排除，避免提交模型、
+混淆矩阵、图片和进度日志等运行产物。
+
+### 有效结果范围
+
+已完成的有效指标只覆盖 A 组 raw feature。完成任务使用的采样规模为：
+
+| Split | Rows |
+| --- | ---: |
+| train | `200,000` |
+| valid | `100,000` |
+| test | `100,000` |
+
+A 组结果：
+
+| Feature | Model | Status | Macro-F1 | Weighted-F1 | Accuracy |
+| --- | --- | --- | ---: | ---: | ---: |
+| A | `knn_sample` | completed | `0.248841` | `0.609144` | `0.619830` |
+| A | `decision_tree` | completed | `0.187873` | `0.666471` | `0.690470` |
+| A | `logistic_sgd` | completed | `0.106740` | `0.486722` | `0.518300` |
+| A | `dummy_stratified` | completed | `0.015424` | `0.162350` | `0.162290` |
+| A | `dummy_most_frequent` | completed | `0.007791` | `0.112072` | `0.266390` |
+| A | `lightgbm` | skipped | - | - | - |
+
+当前 A 组内部结论：
+
+- Macro-F1 最好的是 `A/knn_sample`，为 `0.248841`。
+- Weighted-F1 和 Accuracy 最好的是 `A/decision_tree`，分别为 `0.666471` 和 `0.690470`。
+- Weighted-F1 明显高于 Macro-F1，说明协议类别长尾明显，头部类别主导了加权指标。
+
+### 失败与跳过原因
+
+B/C 组没有产生有效模型指标：
+
+| 组别 | 结果 | 原因 |
+| --- | --- | --- |
+| B | non-LightGBM 全部 failed | isolated worker 退出码 `-9`，加载 258 特征 parquet 时疑似 OOM / signal kill |
+| B | LightGBM skipped | `estimated_peak_gb=5.61` 超过 `safe_limit_gb=4.94` |
+| C | non-LightGBM 全部 failed | isolated worker 退出码 `-9`，加载 349 特征 parquet 时疑似 OOM / signal kill |
+| C | LightGBM skipped | `estimated_peak_gb=6.18` 超过 `safe_limit_gb=4.78` |
+| A | LightGBM skipped | `estimated_peak_gb=4.57` 超过 `safe_limit_gb=3.18` |
+
+这些失败是本机 7.7 GiB 内存环境的容量信号，不是 HCG embedding 特征或融合特征的
+模型效果结论。
+
+### 分析结论
+
+本次归档只能证明以下事项：
+
+1. 分类训练脚本、任务级隔离、失败记录、summary、图表和结果检查流程可运行。
+2. 在 A 组 raw feature 的采样实验中，KNN sample 的 Macro-F1 最好，Decision Tree
+   的 Weighted-F1 / Accuracy 最好。
+3. 本机低内存环境不足以完成 B/C 组采样规模训练，无法判断 HCG embedding 单独特征
+   或 raw+HCG 融合特征是否优于 A。
+
+最终 A/B/C 对比仍应以新机器高内存环境的完整运行结果为准；该环境已在
+“2026-05-26 新环境迁移与评估”和“2026-05-26 GPU 适配与加速方案”中记录。
+
