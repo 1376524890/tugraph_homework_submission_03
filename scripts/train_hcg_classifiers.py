@@ -728,6 +728,34 @@ def train_lightgbm(
     import lightgbm as lgb
     from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
+    # LGBMClassifier uses an internal LabelEncoder that is fitted on
+    # y_train only.  If a class appears in valid/test but not in
+    # train, the internal encoder raises "previously unseen labels".
+    # Fix: borrow one row per missing class from valid (or test) so
+    # that y_train contains every label.
+    all_label_set = set(range(len(xy["classes"])))
+    train_set = set(np.unique(xy["y_train"]))
+    missing = sorted(all_label_set - train_set)
+    X_tr, y_tr = xy["X_train"], xy["y_train"]
+    if missing:
+        extra_x, extra_y_list = [], []
+        for cls in missing:
+            src_key = "X_valid"
+            lbl_key = "y_valid"
+            idx = np.where(xy[lbl_key] == cls)[0]
+            if len(idx) == 0:
+                src_key = "X_test"
+                lbl_key = "y_test"
+                idx = np.where(xy[lbl_key] == cls)[0]
+            if len(idx) == 0:
+                continue
+            extra_x.append(xy[src_key][idx[0]])
+            extra_y_list.append(cls)
+        if extra_x:
+            extra_y_arr = np.array(extra_y_list, dtype=y_tr.dtype)
+            X_tr = np.vstack([xy["X_train"]] + [e.reshape(1, -1) for e in extra_x])
+            y_tr = np.concatenate([xy["y_train"], extra_y_arr])
+
     clf = lgb.LGBMClassifier(
         objective="multiclass",
         num_class=len(xy["classes"]),
@@ -790,8 +818,8 @@ def train_lightgbm(
     ]
     train_started = time.perf_counter()
     clf.fit(
-        xy["X_train"],
-        xy["y_train"],
+        X_tr,
+        y_tr,
         eval_set=[(xy["X_valid"], xy["y_valid"])],
         eval_names=["valid"],
         eval_metric="multi_logloss",

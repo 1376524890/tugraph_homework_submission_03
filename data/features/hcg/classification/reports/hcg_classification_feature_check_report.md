@@ -6,9 +6,9 @@ Overall status: **PASS**
 
 | Dataset | Path |
 | --- | --- |
-| A | `/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets/A_raw_flow_features.parquet` |
-| B | `/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet` |
-| C | `/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet` |
+| A | `/home/codeserver/tugraph_homework_submission_03/data/features/hcg/classification/datasets/A_raw_flow_features.parquet` |
+| B | `/home/codeserver/tugraph_homework_submission_03/data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet` |
+| C | `/home/codeserver/tugraph_homework_submission_03/data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet` |
 
 ## Metrics
 
@@ -29,7 +29,7 @@ Overall status: **PASS**
 | `train_ratio` | `0.699906` |
 | `valid_ratio` | `0.100031` |
 | `test_ratio` | `0.200063` |
-| `check_elapsed_seconds` | `58.611754` |
+| `check_elapsed_seconds` | `41.928640` |
 
 ## Split Counts
 
