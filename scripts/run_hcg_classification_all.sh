@@ -9,6 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
+# ─────────────────── Hub 配置 ─────────────────────────────
+DEFAULT_HF_REPO="tugraph-hcg-classification"
+DEFAULT_MS_REPO="tugraph-hcg-classification"
+
 # ─────────────────────── 颜色定义 ─────────────────────────
 BOLD="\033[1m"
 RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"
@@ -191,6 +195,28 @@ check_environment() {
 
     if ! $all_exist; then
         warn "某些特征数据集缺失"
+
+        # Check if A or B are missing - offer download
+        local need_download=false
+        if [ ! -f "${DATASET_DIR}/A_raw_flow_features.parquet" ] || [ ! -f "${DATASET_DIR}/B_hcg_flow_emb_256.parquet" ]; then
+            need_download=true
+        fi
+
+        if $need_download; then
+            echo ""
+            info "核心数据集 A/B 缺失，需要从 Hub 下载"
+            if ask_yesno "是否从 Hub 下载数据集?" "y"; then
+                if ! download_datasets; then
+                    err "数据集下载失败"
+                    return 1
+                fi
+            else
+                err "缺少核心数据集 A/B，无法继续"
+                return 1
+            fi
+        fi
+
+        # Now check if C needs to be synthesized
         if [ ! -f "${DATASET_DIR}/C_raw_plus_hcg_flow_emb.parquet" ]; then
             if [ -f "${DATASET_DIR}/A_raw_flow_features.parquet" ] && [ -f "${DATASET_DIR}/B_hcg_flow_emb_256.parquet" ]; then
                 echo ""
@@ -226,6 +252,80 @@ print(f'C written: {len(c)} rows, {len(c.columns)} columns, {out.stat().st_size/
         mem_total="$(grep MemTotal /proc/meminfo | awk '{printf "%.1fG", $2/1024/1024}')"
         mem_avail="$(grep MemAvailable /proc/meminfo | awk '{printf "%.1fG", $2/1024/1024}')"
         info "系统内存: 总计 ${mem_total}, 可用 ${mem_avail}"
+    fi
+
+    echo ""
+    return 0
+}
+
+# ─────────────────── 数据下载 ─────────────────────────────
+download_datasets() {
+    header "数据集下载"
+
+    local hub_options=("huggingface — HuggingFace Hub (推荐)")
+    if python3 -c "import modelscope" 2>/dev/null; then
+        hub_options+=("modelscope — ModelScope (魔搭社区)")
+    fi
+
+    local selected_hub=""
+    ask_selection "选择数据源:" hub_options selected_hub
+    selected_hub="${selected_hub%% *}"
+
+    local repo_id=""
+    case "$selected_hub" in
+        huggingface)
+            echo ""
+            read -r -p "$(echo -e "${MAGENTA}[?]${RESET} HuggingFace 仓库 ID [默认: ${DEFAULT_HF_REPO}]: ")" repo_id
+            repo_id="${repo_id:-$DEFAULT_HF_REPO}"
+            ;;
+        modelscope)
+            echo ""
+            read -r -p "$(echo -e "${MAGENTA}[?]${RESET} ModelScope 仓库 ID [默认: ${DEFAULT_MS_REPO}]: ")" repo_id
+            repo_id="${repo_id:-$DEFAULT_MS_REPO}"
+            ;;
+    esac
+
+    ok "数据源: ${selected_hub}/${repo_id}"
+
+    # Check dependencies
+    case "$selected_hub" in
+        huggingface)
+            if ! python3 -c "import huggingface_hub" 2>/dev/null; then
+                warn "huggingface_hub 未安装"
+                if ask_yesno "是否安装 huggingface_hub?" "y"; then
+                    pip install huggingface_hub
+                else
+                    err "请先安装: pip install huggingface_hub"
+                    return 1
+                fi
+            fi
+            ;;
+        modelscope)
+            if ! python3 -c "import modelscope" 2>/dev/null; then
+                warn "modelscope 未安装"
+                if ask_yesno "是否安装 modelscope?" "y"; then
+                    pip install modelscope
+                else
+                    err "请先安装: pip install modelscope"
+                    return 1
+                fi
+            fi
+            ;;
+    esac
+
+    # Download
+    info "开始下载数据集..."
+    PYTHONPATH=src python3 scripts/download_datasets_from_hub.py \
+        --hub "$selected_hub" \
+        --repo-id "$repo_id" \
+        --dataset-dir "$DATASET_DIR"
+
+    local rc=$?
+    if [ $rc -eq 0 ]; then
+        ok "数据集下载完成"
+    else
+        err "数据集下载失败 (exit code: $rc)"
+        return 1
     fi
 
     echo ""

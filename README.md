@@ -596,7 +596,80 @@ flow_emb = concat(src_emb, dst_emb, abs(src_emb - dst_emb), src_emb * dst_emb)
 
 若 endpoint embedding 维度为 `64`，则 `flow_emb` 维度为 `256`。
 
-## 7. HCG 分类器训练
+## 7. 数据集获取
+
+核心分类数据集 A 和 B 已上传到 HuggingFace Hub，可直接下载使用。数据集 C 可由 A + B 自动合成，无需单独下载。
+
+### 7.1 从 HuggingFace 下载
+
+```bash
+# 安装依赖
+pip install huggingface_hub
+
+# 下载数据集（自动合成 C）
+PYTHONPATH=src python3 scripts/download_datasets_from_hub.py \
+  --hub huggingface \
+  --repo-id <username>/tugraph-hcg-classification
+```
+
+### 7.2 从 ModelScope 下载
+
+```bash
+# 安装依赖
+pip install modelscope
+
+# 下载数据集（自动合成 C）
+PYTHONPATH=src python3 scripts/download_datasets_to_hub.py \
+  --hub modelscope \
+  --repo-id <username>/tugraph-hcg-classification
+```
+
+### 7.3 一键脚本自动下载
+
+运行一键训练脚本时，如果检测到数据集缺失，会自动提示从 Hub 下载：
+
+```bash
+bash scripts/run_hcg_classification_all.sh
+```
+
+### 7.4 上传数据集到 Hub
+
+如需上传自己的数据集到 HuggingFace：
+
+```bash
+# 安装依赖
+pip install huggingface_hub
+
+# 登录 HuggingFace
+huggingface-cli login
+
+# 上传数据集 A 和 B
+PYTHONPATH=src python3 scripts/upload_datasets_to_hub.py \
+  --hub huggingface \
+  --repo-id <username>/tugraph-hcg-classification
+```
+
+上传到 ModelScope：
+
+```bash
+# 安装依赖
+pip install modelscope
+
+# 上传数据集
+PYTHONPATH=src python3 scripts/upload_datasets_to_hub.py \
+  --hub modelscope \
+  --repo-id <username>/tugraph-hcg-classification
+```
+
+### 7.5 数据集说明
+
+| 数据集 | 文件 | 大小 | 说明 |
+| --- | --- | --- | --- |
+| A | `A_raw_flow_features.parquet` | ~562 MB | 91 个原始流统计特征 |
+| B | `B_hcg_flow_emb_256.parquet` | ~2.7 GB | 258 个 HCG 图嵌入特征 |
+| C | `C_raw_plus_hcg_flow_emb.parquet` | ~3.3 GB | A + B 融合（自动合成） |
+
+## 8. HCG 分类器训练
 
 分类训练只消费已构建并校验通过的 A/B/C parquet，不重新构建特征、不重新训练 Word2Vec、不重新生成 walks、不重新导入 TuGraph。
 
@@ -975,7 +1048,7 @@ PYTHONPATH=src python3 scripts/train_hcg_classifiers.py \
 rm -rf hcg_classification_training_bundle hcg_classification_training_bundle.tar
 ```
 
-## 8. 查询视图
+## 9. 查询视图
 
 查询视图从 TCG 的 `causes_full_parts` 派生，用于按 `delta_seconds`、关系类型和前驱/后继数量生成子图：
 
@@ -994,7 +1067,7 @@ PYTHONPATH=src python3 scripts/query_tcg_by_delta.py \
 data/processed/tcg/query_views/causes_delta_5s.parquet.report.md
 ```
 
-## 9. 校验重点
+## 10. 校验重点
 
 - `flows.csv` 中的 `record_id` 必须唯一。
 - `flow_id` 只作为普通属性，不作为 Flow 主键。

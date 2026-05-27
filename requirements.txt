@@ -9,3 +9,7 @@ rich
 tqdm
 tensorboard
 tensorboardX
+
+# Optional: For downloading/uploading datasets from HuggingFace/ModelScope
+# huggingface_hub
+# modelscope
