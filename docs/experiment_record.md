@@ -2573,5 +2573,117 @@ B/C 组没有产生有效模型指标：
    或 raw+HCG 融合特征是否优于 A。
 
 最终 A/B/C 对比仍应以新机器高内存环境的完整运行结果为准；该环境已在
-“2026-05-26 新环境迁移与评估”和“2026-05-26 GPU 适配与加速方案”中记录。
+“2026-05-26 新环境迁移与评估”和”2026-05-26 GPU 适配与加速方案”中记录。
 
+## 2026-05-27 数据集上传与脚本仓库绑定
+
+### ModelScope 数据集上传
+
+数据集 A、B 已上传至 ModelScope 仓库 `MarkTom/IP-Network-Flow-HCG`。
+
+```bash
+# 上传命令
+PYTHONPATH=src python3 scripts/upload_datasets_to_hub.py \
+  --hub modelscope \
+  --repo-id MarkTom/IP-Network-Flow-HCG \
+  --dataset-dir data/features/hcg/classification/datasets
+```
+
+上传文件：
+
+| 文件 | 大小 | 说明 |
+| --- | ---: | --- |
+| `A_raw_flow_features.parquet` | ~562 MB | 原始流量统计特征（91 维） |
+| `B_hcg_flow_emb_256.parquet` | ~2.7 GB | HCG 图嵌入特征（258 维） |
+| `README.md` | ~2 KB | 数据集说明文档 |
+
+Dataset C 由 A + B 本地拼接生成，无需上传。
+
+数据集地址：
+
+| 平台 | 地址 |
+| --- | --- |
+| ModelScope | https://modelscope.cn/datasets/MarkTom/IP-Network-Flow-HCG |
+| HuggingFace | https://huggingface.co/datasets/MarkTom/IP-Network-Flow-HCG |
+
+### 脚本与文档仓库绑定
+
+`scripts/run_hcg_classification_all.sh` 默认仓库地址已绑定到实际数据集：
+
+```diff
+-DEFAULT_HF_REPO="tugraph-hcg-classification"
++DEFAULT_HF_REPO="MarkTom/IP-Network-Flow-HCG"
+
+-DEFAULT_MS_REPO="tugraph-hcg-classification"
++DEFAULT_MS_REPO="MarkTom/IP-Network-Flow-HCG"
+```
+
+`README.md` 第 7 节（数据集获取）已更新，将所有占位符 `<username>/tugraph-hcg-classification` 替换为 `MarkTom/IP-Network-Flow-HCG`，并添加数据集地址表格。
+
+### 分类实验结果
+
+使用 GPU 加速模式运行全量分类训练：
+
+```bash
+PYTHONPATH=src conda run -n tugraph python3 scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/hcg/classification/datasets \
+  --output-dir data/features/hcg/classification/results \
+  --runs-dir runs/hcg_classification \
+  --feature-groups A,B,C \
+  --models dummy,logistic_sgd,decision_tree,lightgbm,knn_sample \
+  --no-memory-guard \
+  --lightgbm-device cuda \
+  --logistic-backend pytorch \
+  --logistic-pytorch-lr 0.01 \
+  --logistic-batch-size 200000 \
+  --knn-train-sample 300000 \
+  --knn-test-sample 100000 \
+  --tensorboard --progress --render-figures \
+  --seed 20260525 --resume
+```
+
+#### 结果汇总
+
+| 特征集 | 模型 | 状态 | Macro-F1 | Weighted-F1 | Accuracy | 训练耗时(s) |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| A | decision_tree | completed | 0.2222 | 0.7418 | 0.7549 | 244.6 |
+| A | dummy_most_frequent | completed | 0.0060 | 0.1138 | 0.2687 | 0.2 |
+| A | dummy_stratified | completed | 0.0134 | 0.1631 | 0.1630 | 0.2 |
+| A | knn_sample | completed | 0.2660 | 0.6101 | 0.6204 | 0.2 |
+| A | **lightgbm** | **failed** | — | — | — | — |
+| A | logistic_sgd | completed | 0.0379 | 0.4033 | 0.4296 | 7.8 |
+| B | decision_tree | completed | 0.2441 | 0.6161 | 0.6294 | 2190.7 |
+| B | dummy_most_frequent | completed | 0.0060 | 0.1138 | 0.2687 | 0.3 |
+| B | dummy_stratified | completed | 0.0134 | 0.1631 | 0.1630 | 0.2 |
+| B | knn_sample | completed | **0.3944** | 0.6125 | 0.6167 | 0.8 |
+| B | **lightgbm** | **failed** | — | — | — | — |
+| B | logistic_sgd | completed | 0.0420 | 0.3322 | 0.3794 | 15.1 |
+| C | decision_tree | completed | 0.3062 | **0.7930** | **0.7990** | 2323.6 |
+| C | dummy_most_frequent | completed | 0.0060 | 0.1138 | 0.2687 | 0.2 |
+| C | dummy_stratified | completed | 0.0134 | 0.1631 | 0.1630 | 0.2 |
+| C | knn_sample | completed | 0.3876 | 0.6897 | 0.6944 | 1.0 |
+| C | **lightgbm** | **failed** | — | — | — | — |
+| C | logistic_sgd | completed | 0.0568 | 0.4499 | 0.4730 | 19.0 |
+
+#### 关键发现
+
+1. **最佳 Macro-F1**: `B/knn_sample` = 0.3944（HCG 嵌入特征 + KNN 采样）
+2. **最佳 Weighted-F1**: `C/decision_tree` = 0.7930（组合特征 + 决策树）
+3. **HCG 嵌入价值**: B vs Dummy best Macro-F1 增益 +0.3810，证明 HCG 嵌入对分类有显著贡献
+4. **组合增益**: C vs A Macro-F1 增益 +0.0839（decision_tree），C vs B 增益 +0.0620
+5. **LightGBM CUDA OOM**: 三个特征集均因 GPU 显存不足失败，错误为 `[CUDA] out of memory`
+
+#### LightGBM CUDA OOM 问题
+
+所有 LightGBM 训练均失败，错误信息：
+
+```
+lightgbm.basic.LightGBMError: [CUDA] out of memory (cuda_tree.cpp line 124)
+```
+
+原因：当前 GPU 为 2×RTX 4090（24GB 显存），数据集 357 万行 × 最多 349 列（C 集），CUDA tree learner 在分裂时需要分配额外显存，超出单卡容量。
+
+**待解决**：可尝试以下方案：
+- 使用 `--lightgbm-device cpu` 回退到 CPU LightGBM
+- 减少 `num_leaves`（默认 31）或设置 `max_bin` 降低显存占用
+- 使用 LightGBM 的 `data_sample_strategy=goss` 减少每轮采样量

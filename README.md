@@ -598,9 +598,28 @@ flow_emb = concat(src_emb, dst_emb, abs(src_emb - dst_emb), src_emb * dst_emb)
 
 ## 7. 数据集获取
 
-核心分类数据集 A 和 B 已上传到 HuggingFace Hub，可直接下载使用。数据集 C 可由 A + B 自动合成，无需单独下载。
+核心分类数据集 A 和 B 已上传到 HuggingFace Hub 和 ModelScope，可直接下载使用。数据集 C 可由 A + B 自动合成，无需单独下载。
 
-### 7.1 从 HuggingFace 下载
+仓库地址：
+
+| 平台 | 地址 |
+| --- | --- |
+| ModelScope | https://modelscope.cn/datasets/MarkTom/IP-Network-Flow-HCG |
+| HuggingFace | https://huggingface.co/datasets/MarkTom/IP-Network-Flow-HCG |
+
+### 7.1 从 ModelScope 下载
+
+```bash
+# 安装依赖
+pip install modelscope
+
+# 下载数据集（自动合成 C）
+PYTHONPATH=src python3 scripts/download_datasets_from_hub.py \
+  --hub modelscope \
+  --repo-id MarkTom/IP-Network-Flow-HCG
+```
+
+### 7.2 从 HuggingFace 下载
 
 ```bash
 # 安装依赖
@@ -609,19 +628,7 @@ pip install huggingface_hub
 # 下载数据集（自动合成 C）
 PYTHONPATH=src python3 scripts/download_datasets_from_hub.py \
   --hub huggingface \
-  --repo-id <username>/tugraph-hcg-classification
-```
-
-### 7.2 从 ModelScope 下载
-
-```bash
-# 安装依赖
-pip install modelscope
-
-# 下载数据集（自动合成 C）
-PYTHONPATH=src python3 scripts/download_datasets_to_hub.py \
-  --hub modelscope \
-  --repo-id <username>/tugraph-hcg-classification
+  --repo-id MarkTom/IP-Network-Flow-HCG
 ```
 
 ### 7.3 一键脚本自动下载
@@ -634,7 +641,19 @@ bash scripts/run_hcg_classification_all.sh
 
 ### 7.4 上传数据集到 Hub
 
-如需上传自己的数据集到 HuggingFace：
+上传到 ModelScope：
+
+```bash
+# 安装依赖
+pip install modelscope
+
+# 上传数据集
+PYTHONPATH=src python3 scripts/upload_datasets_to_hub.py \
+  --hub modelscope \
+  --repo-id MarkTom/IP-Network-Flow-HCG
+```
+
+上传到 HuggingFace：
 
 ```bash
 # 安装依赖
@@ -646,19 +665,7 @@ huggingface-cli login
 # 上传数据集 A 和 B
 PYTHONPATH=src python3 scripts/upload_datasets_to_hub.py \
   --hub huggingface \
-  --repo-id <username>/tugraph-hcg-classification
-```
-
-上传到 ModelScope：
-
-```bash
-# 安装依赖
-pip install modelscope
-
-# 上传数据集
-PYTHONPATH=src python3 scripts/upload_datasets_to_hub.py \
-  --hub modelscope \
-  --repo-id <username>/tugraph-hcg-classification
+  --repo-id MarkTom/IP-Network-Flow-HCG
 ```
 
 ### 7.5 数据集说明

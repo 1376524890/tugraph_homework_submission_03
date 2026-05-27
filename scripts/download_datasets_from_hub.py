@@ -13,12 +13,53 @@ Usage:
 """
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
 
 # Add project root to path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+
+# MD5 checksums for dataset files (generated once, embedded for offline verification)
+DATASET_MD5 = {
+    "A_raw_flow_features.parquet": "50072934250a8524bf160e0b287712b8",
+    "B_hcg_flow_emb_256.parquet": "4b34e01f91ac37f186bb2eaf3e345258",
+}
+
+
+def _md5(filepath: Path) -> str:
+    """Compute MD5 hash of a file (streaming, memory-safe)."""
+    h = hashlib.md5()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _verify_md5(dataset_dir: Path, filename: str):
+    """Verify MD5 of a downloaded file against the embedded checksum."""
+    expected = DATASET_MD5.get(filename)
+    if not expected:
+        return  # no reference hash, skip
+    filepath = dataset_dir / filename
+    actual = _md5(filepath)
+    if actual != expected:
+        print(f"  WARNING: MD5 mismatch for {filename}")
+        print(f"    expected: {expected}")
+        print(f"    actual:   {actual}")
+    else:
+        print(f"  MD5 verified: {filename}")
+
+
+def _need_download(dataset_dir: Path, filename: str) -> bool:
+    """Return True if the file needs to be downloaded."""
+    filepath = dataset_dir / filename
+    if not filepath.exists():
+        return True
+    print(f"  {filename} already exists, skipping download")
+    _verify_md5(dataset_dir, filename)
+    return False
 
 
 def download_from_huggingface(dataset_dir: Path, repo_id: str):
@@ -37,9 +78,7 @@ def download_from_huggingface(dataset_dir: Path, repo_id: str):
     ]
 
     for filename in files_to_download:
-        target_path = dataset_dir / filename
-        if target_path.exists():
-            print(f"  {filename} already exists, skipping")
+        if not _need_download(dataset_dir, filename):
             continue
 
         print(f"  Downloading {filename}...")
@@ -50,6 +89,7 @@ def download_from_huggingface(dataset_dir: Path, repo_id: str):
             local_dir=str(dataset_dir),
         )
         print(f"  Downloaded {filename}")
+        _verify_md5(dataset_dir, filename)
 
 
 def download_from_modelscope(dataset_dir: Path, repo_id: str):
@@ -62,12 +102,24 @@ def download_from_modelscope(dataset_dir: Path, repo_id: str):
 
     dataset_dir.mkdir(parents=True, exist_ok=True)
 
+    files_to_download = [
+        "A_raw_flow_features.parquet",
+        "B_hcg_flow_emb_256.parquet",
+    ]
+
+    all_exist = all(not _need_download(dataset_dir, f) for f in files_to_download)
+    if all_exist:
+        return
+
     print(f"  Downloading from ModelScope: {repo_id}...")
     snapshot_download(
         repo_id,
         local_dir=str(dataset_dir),
     )
     print(f"  Downloaded to {dataset_dir}")
+
+    for filename in files_to_download:
+        _verify_md5(dataset_dir, filename)
 
 
 def synthesize_dataset_c(dataset_dir: Path):

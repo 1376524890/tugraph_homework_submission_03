@@ -10,8 +10,8 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
 # ─────────────────── Hub 配置 ─────────────────────────────
-DEFAULT_HF_REPO="tugraph-hcg-classification"
-DEFAULT_MS_REPO="tugraph-hcg-classification"
+DEFAULT_HF_REPO="MarkTom/IP-Network-Flow-HCG"
+DEFAULT_MS_REPO="MarkTom/IP-Network-Flow-HCG"
 
 # ─────────────────────── 颜色定义 ─────────────────────────
 BOLD="\033[1m"
