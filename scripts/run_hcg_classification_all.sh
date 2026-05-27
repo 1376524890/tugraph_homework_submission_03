@@ -262,10 +262,7 @@ print(f'C written: {len(c)} rows, {len(c.columns)} columns, {out.stat().st_size/
 download_datasets() {
     header "数据集下载"
 
-    local hub_options=("huggingface — HuggingFace Hub (推荐)")
-    if python3 -c "import modelscope" 2>/dev/null; then
-        hub_options+=("modelscope — ModelScope (魔搭社区)")
-    fi
+    local hub_options=("huggingface — HuggingFace Hub (推荐)" "modelscope — ModelScope (魔搭社区)")
 
     local selected_hub=""
     ask_selection "选择数据源:" hub_options selected_hub
