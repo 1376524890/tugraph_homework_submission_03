@@ -6,10 +6,10 @@ Dataset C is automatically synthesized from A + B after download.
 
 Usage:
     # Download from HuggingFace
-    PYTHONPATH=src python3 scripts/download_datasets_from_hub.py --hub huggingface --repo-id <username>/tugraph-hcg-classification
+    PYTHONPATH=src python3 scripts/download_datasets_from_hub.py --hub huggingface --repo-id MarkTom/IP-Network-Flow-HCG
 
     # Download from ModelScope
-    PYTHONPATH=src python3 scripts/download_datasets_from_hub.py --hub modelscope --repo-id <username>/tugraph-hcg-classification
+    PYTHONPATH=src python3 scripts/download_datasets_from_hub.py --hub modelscope --repo-id MarkTom/IP-Network-Flow-HCG
 """
 
 import argparse
@@ -107,14 +107,15 @@ def download_from_modelscope(dataset_dir: Path, repo_id: str):
         "B_hcg_flow_emb_256.parquet",
     ]
 
-    all_exist = all(not _need_download(dataset_dir, f) for f in files_to_download)
-    if all_exist:
+    need_files = [f for f in files_to_download if _need_download(dataset_dir, f)]
+    if not need_files:
         return
 
     print(f"  Downloading from ModelScope: {repo_id}...")
     snapshot_download(
         repo_id,
         local_dir=str(dataset_dir),
+        allow_file_pattern=need_files,
     )
     print(f"  Downloaded to {dataset_dir}")
 
