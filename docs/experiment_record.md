@@ -2687,3 +2687,59 @@ lightgbm.basic.LightGBMError: [CUDA] out of memory (cuda_tree.cpp line 124)
 - 使用 `--lightgbm-device cpu` 回退到 CPU LightGBM
 - 减少 `num_leaves`（默认 31）或设置 `max_bin` 降低显存占用
 - 使用 LightGBM 的 `data_sample_strategy=goss` 减少每轮采样量
+
+## 2026-05-27 脚本修复：ModelScope 数据集下载与 GPU 配置
+
+### 问题 1：ModelScope 下载 404
+
+`download_datasets_from_hub.py` 调用 `snapshot_download` 时未指定 `repo_type`，默认为 `"model"`，但仓库 `MarkTom/IP-Network-Flow-HCG` 是 dataset 类型，导致 404。
+
+修复：`scripts/download_datasets_from_hub.py:115` 添加 `repo_type="dataset"`。
+
+### 问题 2：ModelScope 私有仓库认证
+
+仓库为私有（Visibility=3），需登录后才能下载。
+
+修复：`scripts/run_hcg_classification_all.sh` 在 ModelScope 分支中添加登录检测逻辑——当 `MODELSCOPE_API_TOKEN` 未设置且 `repo_exists` 验证失败时，提示用户输入 token 并执行 `modelscope login --token`。
+
+### 问题 3：`set -u` 下未定义变量报错
+
+Shell 脚本启用了 `set -u`（nounset），直接引用 `$MODELSCOPE_API_TOKEN` 在未定义时触发 `unbound variable` 错误。
+
+修复：改为 `${MODELSCOPE_API_TOKEN:-}` 安全展开。
+
+### 问题 4：GPU 配置
+
+原脚本硬编码 `CUDA_VISIBLE_DEVICES=1`（单卡）。改为 `CUDA_VISIBLE_DEVICES=4,5,6,7`。注意训练脚本内部仍为单卡逻辑（无 DataParallel），实际只使用 GPU 4。
+
+### 验证结果
+
+- ModelScope 下载成功：A_raw_flow_features.parquet (563MB) + B_hcg_flow_emb_256.parquet (2.7GB)
+- MD5 校验通过
+
+### 问题 5：LightGBM CUDA 未编译
+
+pip 安装的 LightGBM 4.6.0 不含 CUDA 后端，报错 `CUDA Tree Learner was not enabled in this build`。
+
+修复：通过 conda 安装 `lightgbm=4.5.0=*cuda*`（conda-forge）。脚本中新增 CUDA 后端检测——选 cuda 设备前先实际跑一个小测试验证，不可用则自动提示安装。
+
+### 问题 6：running_status.md 表格始终为空
+
+`isolate_tasks=True` 时，任务在子进程运行，主进程的 `StatusBoard` 对象从未调用 `mark_completed` / `mark_failed`，导致 Completed/Failed/Pending 表格始终为空。
+
+修复：`run_task_isolated` 新增 `status_board` 参数，子进程结束后读取 `task_status.json` + `metrics.json`，调用 `board.mark_completed` 或 `board.mark_failed` 更新主进程状态。
+
+### 问题 7：LightGBM CUDA + sklearn 1.8 不兼容
+
+LightGBM 4.5.0 调用 `check_X_y(..., force_all_finite=False)`，但 scikit-learn 1.8.0 已将该参数改名为 `ensure_all_finite`，报 `TypeError: check_X_y() got an unexpected keyword argument 'force_all_finite'`。
+
+修复：在 `train_hcg_classifiers.py` 顶部添加 monkey-patch，将 `force_all_finite` 透明转发为 `ensure_all_finite`。无需降级 sklearn 或升级 LightGBM。
+
+### 问题 8：StatusBoard 不加载历史记录 & Pending Tasks 为空
+
+1. `StatusBoard` 每次初始化时 `completed`/`failed` 列表为空，不加载历史结果
+2. `pending_tasks()` 仅从当前 run 的 `planned_tasks` 过滤，单任务 run 时 pending 为空
+
+修复（`experiment_monitor.py`）：
+- 新增 `_load_history()`：初始化时从 `metrics_live.csv` 加载历史 completed/failed 记录
+- `pending_tasks()` 改为同时扫描输出目录 `*/*/task_status.json` 发现所有任务，不再仅限当前 run 的 planned list

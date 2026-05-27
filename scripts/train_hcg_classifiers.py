@@ -18,6 +18,31 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+# ── sklearn 1.8+ compatibility shim for LightGBM < 4.6 ──────────────
+# sklearn 1.8 renamed force_all_finite → ensure_all_finite in check_X_y/check_array.
+# LightGBM 4.5 still uses the old name. Monkey-patch sklearn to accept both.
+import sklearn.utils.validation as _sk_val
+
+_orig_check_X_y = _sk_val.check_X_y
+_orig_check_array = _sk_val.check_array
+
+
+def _compat_check_X_y(X, y, *args, **kwargs):
+    if "force_all_finite" in kwargs:
+        kwargs["ensure_all_finite"] = kwargs.pop("force_all_finite")
+    return _orig_check_X_y(X, y, *args, **kwargs)
+
+
+def _compat_check_array(array, *args, **kwargs):
+    if "force_all_finite" in kwargs:
+        kwargs["ensure_all_finite"] = kwargs.pop("force_all_finite")
+    return _orig_check_array(array, *args, **kwargs)
+
+
+_sk_val.check_X_y = _compat_check_X_y
+_sk_val.check_array = _compat_check_array
+# ── end shim ─────────────────────────────────────────────────────────
 import pandas as pd
 
 from tugraph_homework.common import ROOT
@@ -1442,24 +1467,39 @@ def mark_isolated_failure(feature_group: str, model_name: str, args: argparse.Na
     return row
 
 
-def run_task_isolated(feature_group: str, model_name: str, args: argparse.Namespace, display: ProgressDisplay) -> dict[str, Any]:
+def run_task_isolated(feature_group: str, model_name: str, args: argparse.Namespace, display: ProgressDisplay, status_board: StatusBoard | None = None) -> dict[str, Any]:
     tid = task_id(feature_group, model_name)
     display.update(f"{tid} worker start")
+    if status_board:
+        status_board.update_current(tid, "isolated_worker")
     result = subprocess.run(worker_command(feature_group, model_name), cwd=str(ROOT), check=False)
     if result.returncode != 0:
         row = mark_isolated_failure(feature_group, model_name, args, result.returncode)
         display.update(f"{tid} failed worker={result.returncode}", advance=1)
+        if status_board:
+            status_board.mark_failed(row)
         if args.fail_fast:
             raise RuntimeError(f"{tid} isolated worker failed with code {result.returncode}")
         return row
-    status = read_json(task_dir(args.output_dir, feature_group, model_name) / "task_status.json", {})
+    tdir = task_dir(args.output_dir, feature_group, model_name)
+    status = read_json(tdir / "task_status.json", {})
+    metrics = read_json(tdir / "metrics.json", {})
     display.update(f"{tid} {status.get('status', 'done')}", advance=1)
-    return {
+    row = {
         "task_id": tid,
         "feature_group": feature_group,
         "model_name": model_name,
         "status": status.get("status", "completed"),
+        "macro_f1": metrics.get("macro_f1", ""),
+        "weighted_f1": metrics.get("weighted_f1", ""),
+        "accuracy": metrics.get("accuracy", ""),
     }
+    if status_board:
+        if status.get("status") == "failed":
+            status_board.mark_failed(row)
+        else:
+            status_board.mark_completed(row)
+    return row
 
 
 def main() -> int:
@@ -1489,7 +1529,7 @@ def main() -> int:
         for group in feature_groups:
             for model in models:
                 if args.isolate_tasks:
-                    run_task_isolated(group, model, args, display)
+                    run_task_isolated(group, model, args, display, status_board=board)
                 else:
                     run_task(group, model, args, event_logger, board, display)
         if not worker_mode:

@@ -76,6 +76,29 @@ class StatusBoard:
         self.failed: list[dict[str, Any]] = []
         self.current: dict[str, Any] | None = None
         self.last_metrics: dict[str, Any] = {}
+        self._load_history()
+
+    def _load_history(self) -> None:
+        """Load completed/failed tasks from metrics_live.csv of previous runs."""
+        csv_path = self.output_dir / "metrics_live.csv"
+        if not csv_path.exists():
+            return
+        try:
+            import csv as _csv
+            with csv_path.open(newline="", encoding="utf-8") as fh:
+                for row in _csv.DictReader(fh):
+                    if row.get("status") == "failed":
+                        self.failed.append(row)
+                    else:
+                        self.completed.append(row)
+                    # Update last_metrics from the most recent completed task
+                    if row.get("status") != "failed":
+                        for key in ("valid_macro_f1", "valid_weighted_f1", "macro_f1", "weighted_f1"):
+                            val = row.get(key, "")
+                            if val:
+                                self.last_metrics[key] = val
+        except Exception:
+            pass
 
     @property
     def path(self) -> Path:
@@ -100,7 +123,14 @@ class StatusBoard:
     def pending_tasks(self) -> list[str]:
         done = {str(row.get("task_id", "")) for row in self.completed + self.failed}
         current = str(self.current.get("task_id", "")) if self.current else ""
-        return [task for task in self.planned_tasks if task not in done and task != current][:20]
+        # Include tasks from planned list plus any discovered from output directory
+        all_tasks = list(self.planned_tasks)
+        for task_dir in sorted(self.output_dir.glob("*/*")):
+            if task_dir.is_dir() and (task_dir / "task_status.json").exists():
+                tid = f"{task_dir.parent.name}__{task_dir.name}"
+                if tid not in all_tasks:
+                    all_tasks.append(tid)
+        return [task for task in all_tasks if task not in done and task != current]
 
     def write(self) -> None:
         lines = [

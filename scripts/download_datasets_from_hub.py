@@ -116,6 +116,7 @@ def download_from_modelscope(dataset_dir: Path, repo_id: str):
         repo_id,
         local_dir=str(dataset_dir),
         allow_file_pattern=need_files,
+        repo_type="dataset",
     )
     print(f"  Downloaded to {dataset_dir}")
 

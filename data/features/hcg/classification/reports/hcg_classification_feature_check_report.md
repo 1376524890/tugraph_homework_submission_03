@@ -6,9 +6,9 @@ Overall status: **PASS**
 
 | Dataset | Path |
 | --- | --- |
-| A | `/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets/A_raw_flow_features.parquet` |
-| B | `/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet` |
-| C | `/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet` |
+| A | `/home/u2023312303/裴的实验/tugraph_homework_submission_03/data/features/hcg/classification/datasets/A_raw_flow_features.parquet` |
+| B | `/home/u2023312303/裴的实验/tugraph_homework_submission_03/data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet` |
+| C | `/home/u2023312303/裴的实验/tugraph_homework_submission_03/data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet` |
 
 ## Metrics
 
@@ -29,7 +29,7 @@ Overall status: **PASS**
 | `train_ratio` | `0.699906` |
 | `valid_ratio` | `0.100031` |
 | `test_ratio` | `0.200063` |
-| `check_elapsed_seconds` | `61.021059` |
+| `check_elapsed_seconds` | `44.250659` |
 
 ## Split Counts
 

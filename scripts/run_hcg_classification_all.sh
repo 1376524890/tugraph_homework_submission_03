@@ -307,6 +307,30 @@ download_datasets() {
                     return 1
                 fi
             fi
+            # 检查 ModelScope 登录状态
+            if [ -z "${MODELSCOPE_API_TOKEN:-}" ] && ! python3 -c "
+from modelscope.hub.api import HubApi
+HubApi().repo_exists('${repo_id}', repo_type='dataset')
+" 2>/dev/null; then
+                warn "ModelScope 未登录（私有仓库需要认证）"
+                if ask_yesno "是否现在登录 ModelScope?" "y"; then
+                    info "获取地址: https://modelscope.cn/my/myaccesstoken"
+                    read -r -p "$(echo -e "${MAGENTA}[?]${RESET} 请输入 ModelScope API Token: ")" ms_token
+                    if [ -z "$ms_token" ]; then
+                        err "Token 不能为空"
+                        return 1
+                    fi
+                    modelscope login --token "$ms_token"
+                    if [ $? -ne 0 ]; then
+                        err "ModelScope 登录失败"
+                        return 1
+                    fi
+                    ok "ModelScope 登录成功"
+                else
+                    err "私有仓库需要登录，请先运行: modelscope login --token <YOUR_TOKEN>"
+                    return 1
+                fi
+            fi
             ;;
     esac
 
@@ -461,8 +485,35 @@ interactive_config() {
     if [[ " ${MODELS[*]} " =~ " lightgbm " ]]; then
         echo ""
         local lgb_options=("cpu — CPU 多线程训练")
-        if check_cmd nvidia-smi 2>/dev/null && python3 -c "import lightgbm; print(getattr(lightgbm, '__version__', 'ok'))" 2>/dev/null; then
-            lgb_options+=("cuda — GPU 加速 (需 CUDA 版 LightGBM)")
+        local has_cuda_lgb=false
+        if check_cmd nvidia-smi 2>/dev/null; then
+            # 检查 LightGBM 是否有 CUDA 支持
+            if python3 -c "
+import lightgbm, numpy as np
+ds = lightgbm.Dataset(np.random.rand(10, 2), label=[0, 1]*5)
+lightgbm.train({'device': 'cuda', 'verbose': -1, 'num_leaves': 2}, ds, num_boost_round=1)
+" 2>/dev/null; then
+                has_cuda_lgb=true
+            else
+                warn "当前 LightGBM 不支持 CUDA，需要安装 CUDA 版本"
+                if ask_yesno "是否安装 CUDA 版 LightGBM? (conda install lightgbm=4.5.0=*cuda*)" "y"; then
+                    info "正在安装 CUDA 版 LightGBM..."
+                    conda install -y -c conda-forge "lightgbm=4.5.0=*cuda*" 2>&1 | tail -5
+                    if python3 -c "
+import lightgbm, numpy as np
+ds = lightgbm.Dataset(np.random.rand(10, 2), label=[0, 1]*5)
+lightgbm.train({'device': 'cuda', 'verbose': -1, 'num_leaves': 2}, ds, num_boost_round=1)
+" 2>/dev/null; then
+                        has_cuda_lgb=true
+                        ok "CUDA 版 LightGBM 安装成功"
+                    else
+                        err "CUDA 版 LightGBM 安装后仍不可用，回退到 CPU"
+                    fi
+                fi
+            fi
+        fi
+        if [ "$has_cuda_lgb" = true ]; then
+            lgb_options+=("cuda — GPU 加速 (CUDA 版 LightGBM)")
         fi
         if [ ${#lgb_options[@]} -gt 1 ]; then
             ask_selection "选择 LightGBM 设备:" lgb_options LIGHTGBM_DEVICE
@@ -646,7 +697,7 @@ run_training() {
     )
     # Build PYTHONPATH prefix
     local full_cmd=()
-    full_cmd+=(env CUDA_VISIBLE_DEVICES=1 PYTHONPATH=src)
+    full_cmd+=(env CUDA_VISIBLE_DEVICES=4,5,6,7 PYTHONPATH=src)
     full_cmd+=(python3 scripts/train_hcg_classifiers.py)
     full_cmd+=(--dataset-dir "$DATASET_DIR")
     full_cmd+=(--output-dir "$OUTPUT_DIR")

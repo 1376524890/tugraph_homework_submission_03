@@ -1,8 +1,8 @@
 {
   "inputs": {
-    "A": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets/A_raw_flow_features.parquet",
-    "B": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet",
-    "C": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet"
+    "A": "/home/u2023312303/裴的实验/tugraph_homework_submission_03/data/features/hcg/classification/datasets/A_raw_flow_features.parquet",
+    "B": "/home/u2023312303/裴的实验/tugraph_homework_submission_03/data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet",
+    "C": "/home/u2023312303/裴的实验/tugraph_homework_submission_03/data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet"
   },
   "parameters": {
     "expected_hcg_dim": 256
@@ -23,7 +23,7 @@
     "train_ratio": 0.699905738859742,
     "valid_ratio": 0.10003086129858978,
     "test_ratio": 0.20006339984166813,
-    "check_elapsed_seconds": 61.02105854699039
+    "check_elapsed_seconds": 44.25065874308348
   },
   "split_counts": {
     "train": 2503770,
