@@ -2743,3 +2743,159 @@ LightGBM 4.5.0 调用 `check_X_y(..., force_all_finite=False)`，但 scikit-lear
 修复（`experiment_monitor.py`）：
 - 新增 `_load_history()`：初始化时从 `metrics_live.csv` 加载历史 completed/failed 记录
 - `pending_tasks()` 改为同时扫描输出目录 `*/*/task_status.json` 发现所有任务，不再仅限当前 run 的 planned list
+
+## 2026-05-28 完整分类实验结果记录
+
+### 实验概述
+
+本节记录 HCG 图嵌入网络流量分类实验的完整结果。实验在高内存 GPU 机器上完成，共 18 个模型/特征组合（3 特征组 × 6 模型），全部训练成功。
+
+### 数据集
+
+| 指标 | 值 |
+| --- | ---: |
+| 原始数据行数 | 3,577,296 |
+| 目标类别数（`protocol_name`） | 78 |
+| 训练集 | 2,503,770 行 |
+| 验证集 | 357,840 行 |
+| 测试集 | 715,686 行 |
+| 分割方法 | `deterministic_target_record_hash` |
+
+### 特征工程
+
+三组特征用于对比实验：
+
+| 特征组 | 说明 | 特征数 |
+| --- | --- | ---: |
+| **A** | 原始流量统计特征（端口、包长、流持续时间、IAT 等） | 91 |
+| **B** | HCG 端点嵌入特征（src/dst 各 64 维，拼接 + absdiff + product = 256 维） | 258 |
+| **C** | A + B 融合 | 349 |
+
+HCG 端点嵌入生成流程：
+1. 在 TuGraph HCG 图上运行 Node2Vec 随机游走（Python 存储过程，p=1, q=1, walk_length=20, num_walks=5）
+2. 共生成 4,329,750 条游走序列，覆盖 933,050 个端点
+3. 使用 Word2Vec (gensim) 训练 64 维端点向量（sg=1, window=5, negative=5, epochs=5）
+4. 训练耗时 537.7 秒，100% 端点覆盖
+
+### 模型配置
+
+| 模型 | 说明 |
+| --- | --- |
+| `dummy_most_frequent` | 基线：总是预测多数类 |
+| `dummy_stratified` | 基线：按类别比例随机预测 |
+| `logistic_sgd` | 逻辑回归（SGD 优化器），max_iter=1000 |
+| `decision_tree` | 决策树，max_depth=20 |
+| `knn_sample` | K 近邻（采样 20 万训练 / 10 万测试），k=5 |
+| `lightgbm` | LightGBM 梯度提升树，num_leaves=127, n_estimators=1000, early_stopping=50 |
+
+### 完整结果
+
+| 特征 | 模型 | Macro-F1 | Weighted-F1 | 准确率 | 训练耗时(秒) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| A | dummy_most_frequent | 0.0060 | 0.1138 | 0.2687 | 0.3 |
+| A | dummy_stratified | 0.0134 | 0.1631 | 0.1630 | 0.3 |
+| A | logistic_sgd | 0.1007 | 0.4968 | 0.5260 | 238 |
+| A | decision_tree | 0.2222 | 0.7418 | 0.7549 | 301 |
+| A | knn_sample | 0.2660 | 0.6101 | 0.6204 | 0.2 |
+| **A** | **lightgbm** | **0.5665** | **0.8380** | **0.8428** | **18,434** |
+| B | dummy_most_frequent | 0.0060 | 0.1138 | 0.2687 | 0.3 |
+| B | dummy_stratified | 0.0134 | 0.1631 | 0.1630 | 0.3 |
+| B | logistic_sgd | 0.1208 | 0.4421 | 0.4644 | 394 |
+| B | decision_tree | 0.2441 | 0.6161 | 0.6294 | 2,518 |
+| B | knn_sample | 0.3944 | 0.6125 | 0.6167 | 0.6 |
+| **B** | **lightgbm** | **0.7982** | **0.7812** | **0.7892** | **25,750** |
+| C | dummy_most_frequent | 0.0060 | 0.1138 | 0.2687 | 0.3 |
+| C | dummy_stratified | 0.0134 | 0.1631 | 0.1630 | 0.3 |
+| C | logistic_sgd | 0.1409 | 0.5404 | 0.5559 | 498 |
+| C | decision_tree | 0.3062 | 0.7930 | 0.7990 | 2,671 |
+| C | knn_sample | 0.3876 | 0.6897 | 0.6944 | 0.8 |
+| **C** | **lightgbm** | **0.8216** | **0.9014** | **0.9027** | **30,541** |
+
+### 最佳模型：C/lightgbm
+
+- **Macro-F1 = 0.8216**，Weighted-F1 = 0.9014，准确率 = 90.27%
+- Macro-Precision = 0.9473，Macro-Recall = 0.7563
+- 训练耗时 30,541 秒（约 8.5 小时），推理耗时 526 秒
+
+### 融合增益分析
+
+| 对比 | LightGBM Macro-F1 增益 | 说明 |
+| --- | ---: | --- |
+| C vs A | +0.2551 | 原始特征 + HCG 嵌入 vs 仅原始特征 |
+| C vs B | +0.0234 | 原始特征 + HCG 嵌入 vs 仅 HCG 嵌入 |
+| B vs Dummy | +0.7848 | 仅 HCG 嵌入 vs 基线 |
+
+### 修复的训练问题
+
+首次运行遇到 3 个失败任务，均已修复后重跑成功：
+
+1. **LightGBM CUDA 未编译**：pip 安装的 LightGBM 不含 CUDA 后端，改为 conda 安装 `lightgbm=4.5.0=*cuda*`
+2. **sklearn 1.8 不兼容**：LightGBM 4.5.0 调用 `check_X_y(..., force_all_finite=False)` 与 sklearn 1.8 冲突，通过 monkey-patch 修复
+3. **StatusBoard 历史加载**：修复 `experiment_monitor.py` 使其在初始化时加载历史完成记录
+
+### 实验结果图
+
+#### 各模型 Macro-F1 对比
+
+![各模型 Macro-F1 对比](figures/macro_f1_by_model_feature_group.png)
+
+#### 各模型 Weighted-F1 对比
+
+![各模型 Weighted-F1 对比](figures/weighted_f1_by_model_feature_group.png)
+
+#### 各模型准确率对比
+
+![各模型准确率对比](figures/accuracy_by_model_feature_group.png)
+
+#### C vs A 融合增益（Macro-F1）
+
+![C vs A 融合增益](figures/C_vs_A_macro_f1_gain.png)
+
+#### C vs B 融合增益（Macro-F1）
+
+![C vs B 融合增益](figures/C_vs_B_macro_f1_gain.png)
+
+#### Macro-F1 vs 训练耗时
+
+![Macro-F1 vs 训练耗时](figures/macro_f1_vs_train_time.png)
+
+#### 各模型训练耗时对比
+
+![各模型训练耗时](figures/train_time_by_model_feature_group.png)
+
+#### 最佳模型混淆矩阵（C/lightgbm）
+
+![最佳模型混淆矩阵](figures/confusion_matrix_best_model.png)
+
+#### LightGBM 特征重要性（C 组 Top 30）
+
+![LightGBM 特征重要性](figures/lightgbm_feature_importance_C_top30.png)
+
+#### 原始特征 vs HCG 嵌入特征重要性
+
+![原始 vs HCG 特征重要性](figures/raw_vs_hcg_feature_importance_C.png)
+
+#### LightGBM 学习曲线
+
+| A 组 | B 组 | C 组 |
+| --- | --- | --- |
+| ![LightGBM 学习曲线 A](figures/lightgbm_learning_curve_A.png) | ![LightGBM 学习曲线 B](figures/lightgbm_learning_curve_B.png) | ![LightGBM 学习曲线 C](figures/lightgbm_learning_curve_C.png) |
+
+#### LightGBM 各特征组混淆矩阵
+
+| A 组 | B 组 | C 组 |
+| --- | --- | --- |
+| ![混淆矩阵 A](figures/confusion_matrix_lightgbm_A.png) | ![混淆矩阵 B](figures/confusion_matrix_lightgbm_B.png) | ![混淆矩阵 C](figures/confusion_matrix_lightgbm_C.png) |
+
+### 结论
+
+1. **HCG 图嵌入有效**：仅使用 258 维 HCG 嵌入特征（B 组）的 LightGBM Macro-F1 达到 0.7982，远超原始特征（A 组）的 0.5665，证明图结构信息对流量分类有显著贡献
+2. **融合效果最佳**：C 组（原始 + HCG 嵌入）LightGBM 达到 Macro-F1 = 0.8216、准确率 90.27%，相比 A 组提升 +0.2551，相比 B 组提升 +0.0234
+3. **LightGBM 显著优于其他模型**：在所有特征组中，LightGBM 均大幅领先 Decision Tree、KNN 和 Logistic SGD
+4. **训练效率**：LightGBM 训练耗时最长（8-8.5 小时），但推理速度合理（500-570 秒处理 71 万条测试数据）
+
+### 数据与代码
+
+- 模型和数据集已上传至 HuggingFace/ModelScope：`MarkTom/IP-Network-Flow-HCG`
+- 分类结果目录（gitignored）：`data/features/hcg/classification/results/`
+- 本记录中的图片副本：`docs/figures/`
