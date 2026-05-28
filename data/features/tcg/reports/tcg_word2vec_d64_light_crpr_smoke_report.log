@@ -1,0 +1,22 @@
+2026-05-29 00:44:49 INFO TCG Word2Vec training started
+2026-05-29 00:44:49 INFO walks=/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_walks_d64_light_crpr_smoke.txt size=593610 bytes
+2026-05-29 00:44:49 INFO id_map=/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_node_id_map_d64_light_crpr_smoke.csv size=144559 bytes
+2026-05-29 00:44:49 INFO parameters: vector_size=64 window=5 min_count=1 sg=1 negative=5 sample=0.0001 epochs=1 workers=4 seed=20260528 max_lines=0
+2026-05-29 00:44:49 INFO reading id map: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_node_id_map_d64_light_crpr_smoke.csv
+2026-05-29 00:44:49 INFO id map loaded: 6788 tokens
+2026-05-29 00:44:49 INFO summarizing walks: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_walks_d64_light_crpr_smoke.txt max_lines=0
+2026-05-29 00:44:49 INFO walk summary finished: lines=4000 unique_tokens=6788 avg_len=9.8935
+2026-05-29 00:44:49 INFO initializing Word2Vec model
+2026-05-29 00:44:49 INFO building Word2Vec vocabulary
+2026-05-29 00:44:49 INFO vocabulary built: vocab=6788 corpus_count=4000 corpus_total_words=39574
+2026-05-29 00:44:49 INFO training Word2Vec
+2026-05-29 00:44:49 INFO training epoch 1/1 started
+2026-05-29 00:44:49 INFO training epoch 1/1 finished in 0.06s
+2026-05-29 00:44:49 INFO saving gensim model: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/node2vec/tcg_flow_node2vec_d64_light_crpr_smoke.model
+2026-05-29 00:44:49 INFO gensim model saved
+2026-05-29 00:44:49 INFO building embedding dataframe
+2026-05-29 00:44:49 INFO writing parquet: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/node2vec/tcg_flow_node2vec_d64_light_crpr_smoke.parquet rows=6788 dim=64
+2026-05-29 00:44:49 INFO parquet write finished
+2026-05-29 00:44:49 INFO computing nearest samples: 10
+2026-05-29 00:44:49 INFO reports written: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d64_light_crpr_smoke_report.md /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d64_light_crpr_smoke_report.json
+2026-05-29 00:44:49 INFO TCG Word2Vec training finished: status=PASS elapsed=0.28s

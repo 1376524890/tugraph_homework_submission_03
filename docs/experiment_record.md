@@ -2899,3 +2899,118 @@ HCG 端点嵌入生成流程：
 - 模型和数据集已上传至 HuggingFace/ModelScope：`MarkTom/IP-Network-Flow-HCG`
 - 分类结果目录（gitignored）：`data/features/hcg/classification/results/`
 - 本记录中的图片副本：`docs/figures/`
+
+## 2026-05-29 TCG D64-light CR+PR Node2Vec + Word2Vec + D/E/F 数据集构建
+
+### 目标
+
+在 TCG (Traffic Causality Graph) 上使用 CR+PR 关系构建 D64-light 流程：
+1. 在 TuGraph 内通过 Python stored procedure 生成 Node2Vec walks
+2. 在外部通过 gensim Word2Vec 训练 flow-level 64 维 embedding
+3. 构建 D/E/F 三个分类数据集
+
+### 为什么使用 Python stored procedure
+
+- C++ stored procedure 在 TuGraph 4.5.2 中存在返回/清理阶段崩溃风险
+- Python 版本稳定可靠，性能可接受（~1000-4000 nodes/sec）
+
+### 为什么 D64-light 先用 CR+PR
+
+- CR+PR 边数 38.3M，约为全量 TCG 134M 的 28.5%
+- 磁盘空间有限（32GB 可用），全量导入不可行
+- CR+PR 是最高优先级的因果关系，信息密度最高
+
+### TuGraph 图导入
+
+| 项目 | 值 |
+|------|-----|
+| 图名 | `tcg_light_crpr` |
+| Flow 顶点 | 3,577,296 |
+| CAUSES 边 (实际) | 38,311,128 |
+| CR 边 | 346,015 |
+| PR 边 | 37,965,152 |
+| 导入耗时 | 497 秒 |
+
+### Node2Vec 参数
+
+| 参数 | 值 |
+|------|-----|
+| walk_length | 10 |
+| num_walks | 2 |
+| p | 1.0 |
+| q | 1.0 |
+| batch_size | 50000 |
+| token_field | record_id |
+| weight_field | (无，等权) |
+
+### Word2Vec 参数
+
+| 参数 | 值 |
+|------|-----|
+| vector_size | 64 |
+| window | 5 |
+| min_count | 1 |
+| sg | 1 (Skip-gram) |
+| negative | 5 |
+| sample | 1e-4 |
+| epochs | 3 |
+| workers | 4 |
+| seed | 20260528 |
+
+### Walk 文件规模
+
+| 项目 | 值 |
+|------|-----|
+| Walk 行数 | 5,721,388 |
+| 覆盖 start nodes | 2,860,694 / 3,577,296 (80%) |
+| 唯一 token 数 | ~3.2M |
+| 状态 | 部分完成（高 offset 时 pick_start_nodes 遍历慢） |
+
+### TCG Embedding
+
+| 项目 | 值 |
+|------|-----|
+| Parquet 行数 | 3,213,039 |
+| 维度 | 64 |
+| 文件大小 | 929 MB |
+| 覆盖率 | 89.8% |
+
+### D/E/F 数据集构建
+
+| 数据集 | 行数 | 列数 | 缺失 embedding | 说明 |
+|--------|------|------|----------------|------|
+| D | 3,577,296 | 69 | 364,257 (10.18%) | TCG embedding only |
+| E | 3,577,296 | 160 | 364,257 (10.18%) | A raw + TCG |
+| F | 3,577,296 | 418 | 364,257 (10.18%) | C (raw+HCG) + TCG |
+
+缺失 embedding 的行以 0 填充，`tcg_emb_missing=1` 标记。
+
+### D64-capped 规模评估
+
+| K | 预估边数 | 预估磁盘 | 判定 |
+|---|----------|----------|------|
+| K=5 | 15.8M | 8.5GB | 可行（20GB 可用） |
+| K=10 | 29.0M | 14.0GB | 谨慎（需清理空间） |
+| K=20 | 50.2M | 22.9GB | 不可行 |
+
+### 关键脚本
+
+| 脚本 | 用途 |
+|------|------|
+| `procedures/tcg_node2vec_walk_py_batch.py` | TCG Node2Vec 存储过程 |
+| `scripts/run_tcg_node2vec_procedure_batch.py` | 批处理运行器 |
+| `scripts/train_tcg_word2vec_embeddings.py` | Word2Vec 训练 |
+| `scripts/check_tcg_walks_file.py` | Walk 文件校验 |
+| `scripts/build_tcg_classification_features.py` | D/E/F 构建 |
+| `scripts/check_tcg_classification_features.py` | D/E/F 校验 |
+| `scripts/estimate_tcg_capped_size.py` | Capped 规模评估 |
+
+### 关键产物
+
+```text
+data/features/tcg/node2vec/tcg_flow_node2vec_d64_light_crpr.parquet
+data/features/tcg/classification/datasets/D_tcg_flow_node2vec_d64_light_crpr.parquet
+data/features/tcg/classification/datasets/E_raw_plus_tcg_d64_light_crpr.parquet
+data/features/tcg/classification/datasets/F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet
+data/features/tcg/reports/
+```

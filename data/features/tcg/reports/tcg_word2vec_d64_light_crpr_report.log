@@ -1,0 +1,26 @@
+2026-05-29 02:43:24 INFO TCG Word2Vec training started
+2026-05-29 02:43:24 INFO walks=/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_walks_d64_light_crpr.txt size=659435130 bytes
+2026-05-29 02:43:24 INFO id_map=/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_node_id_map_d64_light_crpr.csv size=76128635 bytes
+2026-05-29 02:43:24 INFO parameters: vector_size=64 window=5 min_count=1 sg=1 negative=5 sample=0.0001 epochs=3 workers=4 seed=20260528 max_lines=0
+2026-05-29 02:43:24 INFO reading id map: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_node_id_map_d64_light_crpr.csv
+2026-05-29 02:43:30 INFO id map loaded: 3213039 tokens
+2026-05-29 02:43:30 INFO summarizing walks: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_walks_d64_light_crpr.txt max_lines=0
+2026-05-29 02:43:43 INFO walk summary finished: lines=5721388 unique_tokens=3213039 avg_len=7.6839
+2026-05-29 02:43:43 INFO initializing Word2Vec model
+2026-05-29 02:43:43 INFO building Word2Vec vocabulary
+2026-05-29 02:44:44 INFO vocabulary built: vocab=3213039 corpus_count=5721388 corpus_total_words=43962342
+2026-05-29 02:44:44 INFO training Word2Vec
+2026-05-29 02:44:44 INFO training epoch 1/3 started
+2026-05-29 02:48:44 INFO training epoch 1/3 finished in 239.44s
+2026-05-29 02:48:44 INFO training epoch 2/3 started
+2026-05-29 02:52:28 INFO training epoch 2/3 finished in 224.01s
+2026-05-29 02:52:28 INFO training epoch 3/3 started
+2026-05-29 02:56:08 INFO training epoch 3/3 finished in 220.33s
+2026-05-29 02:56:08 INFO saving gensim model: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/node2vec/tcg_flow_node2vec_d64_light_crpr.model
+2026-05-29 02:56:44 INFO gensim model saved
+2026-05-29 02:56:44 INFO building embedding dataframe
+2026-05-29 02:56:54 INFO writing parquet: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/node2vec/tcg_flow_node2vec_d64_light_crpr.parquet rows=3213039 dim=64
+2026-05-29 02:57:15 INFO parquet write finished
+2026-05-29 02:57:17 INFO computing nearest samples: 10
+2026-05-29 02:57:19 INFO reports written: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d64_light_crpr_report.md /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d64_light_crpr_report.json
+2026-05-29 02:57:19 INFO TCG Word2Vec training finished: status=PASS elapsed=834.77s

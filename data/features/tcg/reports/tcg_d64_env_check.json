@@ -1,0 +1,103 @@
+{
+  "timestamp": "2026-05-29T00:00:00",
+  "git": {
+    "branch": "master",
+    "clean": true,
+    "head": "e7e2a62",
+    "recent_commits": [
+      "e7e2a62 fix: 修复 ModelScope 下载、LightGBM CUDA 兼容性与 StatusBoard 状态同步",
+      "1a3ae18 chore: 将 huggingface_hub 和 modelscope 加入 requirements.txt",
+      "9b9de54 fix: 始终显示 ModelScope 下载选项，不依赖预装包",
+      "927e939 fix: ModelScope 下载改为逐文件过滤，更新 docstring 仓库地址",
+      "8124416 feat: 补齐数据集下载脚本 MD5 校验，绑定仓库地址并更新实验记录"
+    ]
+  },
+  "disk": {
+    "home_total_gb": 196,
+    "home_used_gb": 154,
+    "home_avail_gb": 32,
+    "home_use_pct": 83,
+    "root_total_gb": 31,
+    "root_used_gb": 26,
+    "root_avail_gb": 3.1,
+    "below_50gb_threshold": true,
+    "tcg_processed_gb": 20,
+    "hcg_datasets_gb": 6.4,
+    "tugraph_data_gb": 37,
+    "tugraph_import_mb": 479,
+    "tugraph_tmp_mb": 883
+  },
+  "tugraph": {
+    "container_running": true,
+    "container_name": "tugraph-db",
+    "http_reachable": true,
+    "http_url": "http://127.0.0.1:7070",
+    "bolt_uri": "bolt://localhost:7687"
+  },
+  "tcg_data": {
+    "flows_csv_rows": 3577296,
+    "flows_csv_header_rows": 3577297,
+    "cr_edges": 346015,
+    "pr_edges": 37965152,
+    "dhr_edges": 54938859,
+    "shr_edges": 40990523,
+    "total_edges": 134240549,
+    "cr_plus_pr_edges": 38311167,
+    "cr_plus_pr_fraction": 0.2854
+  },
+  "hcg_datasets": {
+    "A": {
+      "path": "data/features/hcg/classification/datasets/A_raw_flow_features.parquet",
+      "rows": 3577296,
+      "columns": 96,
+      "record_id_unique": 3577296
+    },
+    "B": {
+      "path": "data/features/hcg/classification/datasets/B_hcg_flow_emb_256.parquet",
+      "rows": 3577296,
+      "columns": 263,
+      "record_id_unique": 3577296
+    },
+    "C": {
+      "path": "data/features/hcg/classification/datasets/C_raw_plus_hcg_flow_emb.parquet",
+      "rows": 3577296,
+      "columns": 354,
+      "record_id_unique": 3577296
+    },
+    "ABC_record_ids_identical": true,
+    "ABC_same_order": true
+  },
+  "key_scripts": {
+    "procedures/hcg_node2vec_walk_py_batch.py": true,
+    "scripts/run_hcg_node2vec_procedure_batch.py": true,
+    "scripts/train_hcg_word2vec_embeddings.py": true,
+    "scripts/import_tugraph_native.py": true,
+    "scripts/create_tugraph_import_config.py": true
+  },
+  "tcg_scripts_to_create": [
+    "procedures/tcg_node2vec_walk_py_batch.py",
+    "scripts/run_tcg_node2vec_procedure_batch.py",
+    "scripts/train_tcg_word2vec_embeddings.py",
+    "scripts/check_tcg_walks_file.py",
+    "scripts/build_tcg_classification_features.py",
+    "scripts/check_tcg_classification_features.py"
+  ],
+  "feasibility": {
+    "d64_light_crpr": {
+      "edge_count": 38311167,
+      "estimated_import_input_gb": 2.5,
+      "estimated_tugraph_data_gb": 5,
+      "estimated_walk_file_gb": 3,
+      "estimated_embedding_parquet_mb": 900,
+      "verdict": "CAUTION - disk 32GB available, estimated peak ~10GB additional, feasible but tight"
+    },
+    "d64_capped_k5": {
+      "estimated_edge_count_upper_bound": 35800000,
+      "verdict": "NEEDS_ESTIMATION"
+    },
+    "d64_capped_k10": {
+      "estimated_edge_count_upper_bound": 71500000,
+      "verdict": "NEEDS_ESTIMATION"
+    }
+  }
+}

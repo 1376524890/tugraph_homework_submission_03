@@ -1,0 +1,387 @@
+{
+  "inputs": {
+    "walks": "/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_walks_d64_light_crpr.txt",
+    "id_map": "/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_node_id_map_d64_light_crpr.csv"
+  },
+  "outputs": {
+    "parquet": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/node2vec/tcg_flow_node2vec_d64_light_crpr.parquet",
+    "model": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/node2vec/tcg_flow_node2vec_d64_light_crpr.model",
+    "report": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d64_light_crpr_report.md",
+    "json_report": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d64_light_crpr_report.json",
+    "log_file": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d64_light_crpr_report.log"
+  },
+  "parameters": {
+    "vector_size": 64,
+    "window": 5,
+    "min_count": 1,
+    "sg": 1,
+    "negative": 5,
+    "sample": 0.0001,
+    "epochs": 3,
+    "workers": 4,
+    "seed": 20260528,
+    "max_lines": 0
+  },
+  "dependencies": {
+    "gensim": "4.4.0",
+    "numpy": "2.4.6",
+    "pandas": "3.0.3",
+    "pyarrow": "24.0.0"
+  },
+  "metrics": {
+    "walk_line_count": 5721388,
+    "sentence_count": 5721388,
+    "empty_line_count": 0,
+    "average_walk_length": 7.683859580926866,
+    "min_walk_length": 2,
+    "max_walk_length": 10,
+    "walk_unique_token_count": 3213039,
+    "id_map_token_count": 3213039,
+    "word2vec_vocab_token_count": 3213039,
+    "parquet_row_count": 3213039,
+    "missing_id_map_token_count": 0,
+    "id_map_coverage": 1.0,
+    "nan_count": 0,
+    "inf_count": 0,
+    "embedding_columns": [
+      "emb_000",
+      "emb_001",
+      "emb_002",
+      "emb_003",
+      "emb_004",
+      "emb_005",
+      "emb_006",
+      "emb_007",
+      "emb_008",
+      "emb_009",
+      "emb_010",
+      "emb_011",
+      "emb_012",
+      "emb_013",
+      "emb_014",
+      "emb_015",
+      "emb_016",
+      "emb_017",
+      "emb_018",
+      "emb_019",
+      "emb_020",
+      "emb_021",
+      "emb_022",
+      "emb_023",
+      "emb_024",
+      "emb_025",
+      "emb_026",
+      "emb_027",
+      "emb_028",
+      "emb_029",
+      "emb_030",
+      "emb_031",
+      "emb_032",
+      "emb_033",
+      "emb_034",
+      "emb_035",
+      "emb_036",
+      "emb_037",
+      "emb_038",
+      "emb_039",
+      "emb_040",
+      "emb_041",
+      "emb_042",
+      "emb_043",
+      "emb_044",
+      "emb_045",
+      "emb_046",
+      "emb_047",
+      "emb_048",
+      "emb_049",
+      "emb_050",
+      "emb_051",
+      "emb_052",
+      "emb_053",
+      "emb_054",
+      "emb_055",
+      "emb_056",
+      "emb_057",
+      "emb_058",
+      "emb_059",
+      "emb_060",
+      "emb_061",
+      "emb_062",
+      "emb_063"
+    ],
+    "vector_size": 64,
+    "training_elapsed_seconds": 834.7747905779979,
+    "training_elapsed_minutes": 13.912913176299964,
+    "seed": 20260528,
+    "id_map_coverage_percent": 100.0
+  },
+  "checks": {
+    "walks_read": true,
+    "vocab_non_empty": true,
+    "parquet_rows_equal_vocab": true,
+    "no_nan": true,
+    "no_inf": true,
+    "id_map_no_missing_tokens": true,
+    "record_id_non_empty": true,
+    "record_id_unique": true,
+    "vocab_equals_walk_unique_tokens": true
+  },
+  "overall_status": "PASS",
+  "nearest_samples": [
+    {
+      "record_id": "rec_0002620021",
+      "nearest": [
+        {
+          "record_id": "rec_0002619468",
+          "similarity": 0.9853149652481079
+        },
+        {
+          "record_id": "rec_0002620026",
+          "similarity": 0.9848983883857727
+        },
+        {
+          "record_id": "rec_0002620117",
+          "similarity": 0.9833821058273315
+        },
+        {
+          "record_id": "rec_0002611440",
+          "similarity": 0.9799908399581909
+        },
+        {
+          "record_id": "rec_0002621001",
+          "similarity": 0.9790101647377014
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0001465371",
+      "nearest": [
+        {
+          "record_id": "rec_0001465365",
+          "similarity": 0.9877455830574036
+        },
+        {
+          "record_id": "rec_0001521140",
+          "similarity": 0.9872516989707947
+        },
+        {
+          "record_id": "rec_0001519664",
+          "similarity": 0.9860409498214722
+        },
+        {
+          "record_id": "rec_0001465481",
+          "similarity": 0.9859040975570679
+        },
+        {
+          "record_id": "rec_0001518795",
+          "similarity": 0.9855793118476868
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0002936165",
+      "nearest": [
+        {
+          "record_id": "rec_0002935909",
+          "similarity": 0.9977943897247314
+        },
+        {
+          "record_id": "rec_0002935690",
+          "similarity": 0.9974252581596375
+        },
+        {
+          "record_id": "rec_0002936213",
+          "similarity": 0.9973729848861694
+        },
+        {
+          "record_id": "rec_0002936282",
+          "similarity": 0.9962822198867798
+        },
+        {
+          "record_id": "rec_0002935688",
+          "similarity": 0.9960227012634277
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0002935686",
+      "nearest": [
+        {
+          "record_id": "rec_0002936221",
+          "similarity": 0.9978594779968262
+        },
+        {
+          "record_id": "rec_0002936284",
+          "similarity": 0.9976432919502258
+        },
+        {
+          "record_id": "rec_0002936254",
+          "similarity": 0.9975655674934387
+        },
+        {
+          "record_id": "rec_0002936132",
+          "similarity": 0.9953130483627319
+        },
+        {
+          "record_id": "rec_0002936109",
+          "similarity": 0.9945099949836731
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0002021386",
+      "nearest": [
+        {
+          "record_id": "rec_0001967296",
+          "similarity": 0.9984016418457031
+        },
+        {
+          "record_id": "rec_0001968060",
+          "similarity": 0.9972605109214783
+        },
+        {
+          "record_id": "rec_0002021301",
+          "similarity": 0.9970881342887878
+        },
+        {
+          "record_id": "rec_0001967295",
+          "similarity": 0.9969297647476196
+        },
+        {
+          "record_id": "rec_0002020489",
+          "similarity": 0.9967120289802551
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0002936132",
+      "nearest": [
+        {
+          "record_id": "rec_0002936213",
+          "similarity": 0.9979252815246582
+        },
+        {
+          "record_id": "rec_0002935909",
+          "similarity": 0.9974501729011536
+        },
+        {
+          "record_id": "rec_0002935686",
+          "similarity": 0.9953129887580872
+        },
+        {
+          "record_id": "rec_0002936165",
+          "similarity": 0.9943295121192932
+        },
+        {
+          "record_id": "rec_0002936282",
+          "similarity": 0.9937440156936646
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0001762444",
+      "nearest": [
+        {
+          "record_id": "rec_0001891519",
+          "similarity": 0.9905155897140503
+        },
+        {
+          "record_id": "rec_0001815003",
+          "similarity": 0.9900240898132324
+        },
+        {
+          "record_id": "rec_0001892103",
+          "similarity": 0.989233672618866
+        },
+        {
+          "record_id": "rec_0001814674",
+          "similarity": 0.9892151951789856
+        },
+        {
+          "record_id": "rec_0001814675",
+          "similarity": 0.9872271418571472
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0001958691",
+      "nearest": [
+        {
+          "record_id": "rec_0001956428",
+          "similarity": 0.9894434213638306
+        },
+        {
+          "record_id": "rec_0001956430",
+          "similarity": 0.9826483726501465
+        },
+        {
+          "record_id": "rec_0001956429",
+          "similarity": 0.9806596636772156
+        },
+        {
+          "record_id": "rec_0001958897",
+          "similarity": 0.9804893136024475
+        },
+        {
+          "record_id": "rec_0001959393",
+          "similarity": 0.9797857403755188
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0001962657",
+      "nearest": [
+        {
+          "record_id": "rec_0001960762",
+          "similarity": 0.9963589906692505
+        },
+        {
+          "record_id": "rec_0001963212",
+          "similarity": 0.9950608611106873
+        },
+        {
+          "record_id": "rec_0001963694",
+          "similarity": 0.9947972297668457
+        },
+        {
+          "record_id": "rec_0001963407",
+          "similarity": 0.9943317174911499
+        },
+        {
+          "record_id": "rec_0001963301",
+          "similarity": 0.993189811706543
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0001971067",
+      "nearest": [
+        {
+          "record_id": "rec_0001968060",
+          "similarity": 0.9984906315803528
+        },
+        {
+          "record_id": "rec_0002020489",
+          "similarity": 0.9981645345687866
+        },
+        {
+          "record_id": "rec_0001970794",
+          "similarity": 0.9966921210289001
+        },
+        {
+          "record_id": "rec_0002021386",
+          "similarity": 0.9964998364448547
+        },
+        {
+          "record_id": "rec_0001967296",
+          "similarity": 0.9935266971588135
+        }
+      ]
+    }
+  ],
+  "join_design": {
+    "level": "Flow",
+    "join_key": "record_id",
+    "embedding_dim": 64
+  }
+}

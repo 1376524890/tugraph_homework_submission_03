@@ -1,0 +1,27 @@
+{
+  "walk_file": "/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_walks_d64_light_crpr.txt",
+  "id_map_file": "/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_node_id_map_d64_light_crpr.csv",
+  "walk_line_count": 5721388,
+  "empty_line_count": 0,
+  "dead_end_walks": 0,
+  "short_walks_lt_min": 0,
+  "min_walk_length": 2,
+  "max_walk_length": 10,
+  "avg_walk_length": 7.683859580926866,
+  "p50_walk_length": 10,
+  "unique_token_count": 3213039,
+  "id_map_token_count": 3213039,
+  "id_map_empty_tokens": 0,
+  "tokens_not_in_id_map_count": 0,
+  "id_map_tokens_not_in_walks_count": 0,
+  "checks": {
+    "walk_file_exists": true,
+    "id_map_exists": true,
+    "walk_line_count_positive": true,
+    "no_empty_lines": true,
+    "min_walk_length_ok": true,
+    "id_map_no_empty_tokens": true,
+    "all_walk_tokens_in_id_map": true
+  },
+  "overall_status": "PASS"
+}

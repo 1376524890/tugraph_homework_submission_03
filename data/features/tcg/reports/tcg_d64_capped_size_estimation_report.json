@@ -1,0 +1,83 @@
+Scanning TCG edges...
+  CR: 1 files
+  PR: 38 files
+  DHR: 55 files
+  SHR: 41 files
+{
+  "edge_counts": {
+    "CR": 346014,
+    "PR": 37965114,
+    "DHR": 54938804,
+    "SHR": 40990482
+  },
+  "total_edges": 134240414,
+  "unique_src": 3410883,
+  "unique_dst": 3476117,
+  "unique_vertices": 3536188,
+  "src_out_degree_stats": {
+    "count": 3410883,
+    "min": 1,
+    "p50": 21,
+    "p90": 93,
+    "p95": 139,
+    "p99": 284,
+    "max": 720
+  },
+  "dst_in_degree_stats": {
+    "count": 3476117,
+    "min": 1,
+    "p50": 23,
+    "p90": 89,
+    "p95": 129,
+    "p99": 251,
+    "max": 690
+  },
+  "k5": {
+    "K": 5,
+    "predecessor_capped_edges": 16175961,
+    "successor_capped_edges": 15514918,
+    "union_upper_bound": 16175961,
+    "union_estimate": 15845439,
+    "disk_estimate": {
+      "csv_input_gb": 2.21,
+      "tugraph_data_gb": 4.43,
+      "walk_file_gb": 1.0,
+      "embedding_parquet_mb": 873.36,
+      "total_peak_gb": 8.49
+    },
+    "verdict": "CAUTION - estimated 8.5GB needed, 20.4GB free"
+  },
+  "k10": {
+    "K": 10,
+    "predecessor_capped_edges": 29804719,
+    "successor_capped_edges": 28268074,
+    "union_upper_bound": 29804719,
+    "union_estimate": 29036396,
+    "disk_estimate": {
+      "csv_input_gb": 4.06,
+      "tugraph_data_gb": 8.11,
+      "walk_file_gb": 1.0,
+      "embedding_parquet_mb": 873.36,
+      "total_peak_gb": 14.02
+    },
+    "verdict": "CAUTION - estimated 14.0GB needed, 20.4GB free"
+  },
+  "k20": {
+    "K": 20,
+    "predecessor_capped_edges": 51681246,
+    "successor_capped_edges": 48672709,
+    "union_upper_bound": 51681246,
+    "union_estimate": 50176977,
+    "disk_estimate": {
+      "csv_input_gb": 7.01,
+      "tugraph_data_gb": 14.02,
+      "walk_file_gb": 1.0,
+      "embedding_parquet_mb": 873.36,
+      "total_peak_gb": 22.88
+    },
+    "verdict": "CAUTION - estimated 22.9GB needed, 20.4GB free"
+  },
+  "disk_free_gb": 20.38,
+  "sample_rows": 0,
+  "full_scan": true
+}

@@ -1084,3 +1084,129 @@ data/processed/tcg/query_views/causes_delta_5s.parquet.report.md
 - TCG 构建前先查看 `data/processed/reports/tcg_edge_estimation_report.md`。
 
 更多字段说明见 [docs/graph_modeling.md](docs/graph_modeling.md)、[docs/dataset_structure.md](docs/dataset_structure.md) 和 [docs/data_report.md](docs/data_report.md)。
+
+## 11. TCG D64-light Node2Vec + Word2Vec
+
+TCG D64-light 使用 CR+PR 关系（38.3M 边，约为全量 TCG 的 28.5%）在 TuGraph 中生成 Node2Vec walks，然后训练 64 维 flow-level Word2Vec embedding。
+
+### 11.1 导入 CR+PR 子图
+
+```bash
+# 准备 CR+PR 数据目录
+mkdir -p data/processed/tcg_light_crpr/causes_full_parts
+ln data/processed/tcg/flows.csv data/processed/tcg_light_crpr/flows.csv
+cp -al data/processed/tcg/causes_full_parts/relation_type=CR data/processed/tcg_light_crpr/causes_full_parts/
+cp -al data/processed/tcg/causes_full_parts/relation_type=PR data/processed/tcg_light_crpr/causes_full_parts/
+
+# 准备导入目录
+mkdir -p docker/tugraph-import-light
+cp -al data/processed/tcg_light_crpr docker/tugraph-import-light/tcg
+
+# 导入到 TuGraph
+PYTHONPATH=src python3 scripts/import_tugraph_native.py \
+  --graph-type tcg --graph tcg_light_crpr \
+  --import-root docker/tugraph-import-light --force
+```
+
+### 11.2 Node2Vec Walks
+
+```bash
+# Smoke test
+PYTHONPATH=src python3 scripts/run_tcg_node2vec_procedure_batch.py \
+  --graph tcg_light_crpr --delete-first \
+  --walk-length 10 --num-walks 2 --batch-size 1000 --max-batches 2 \
+  --output-path docker/tugraph-tmp/tcg_walks_d64_light_crpr_smoke.txt \
+  --id-map-path docker/tugraph-tmp/tcg_node_id_map_d64_light_crpr_smoke.csv
+
+# 全量（支持断点续跑）
+PYTHONPATH=src python3 scripts/run_tcg_node2vec_procedure_batch.py \
+  --graph tcg_light_crpr \
+  --walk-length 10 --num-walks 2 --batch-size 50000 \
+  --output-path docker/tugraph-tmp/tcg_walks_d64_light_crpr.txt \
+  --id-map-path docker/tugraph-tmp/tcg_node_id_map_d64_light_crpr.csv \
+  --progress --resume --timeout 1200 --procedure-time-budget 900
+```
+
+### 11.3 Word2Vec 训练
+
+```bash
+PYTHONPATH=src python3 scripts/train_tcg_word2vec_embeddings.py \
+  --walks docker/tugraph-tmp/tcg_walks_d64_light_crpr.txt \
+  --id-map docker/tugraph-tmp/tcg_node_id_map_d64_light_crpr.csv \
+  --output data/features/tcg/node2vec/tcg_flow_node2vec_d64_light_crpr.parquet \
+  --model-output data/features/tcg/node2vec/tcg_flow_node2vec_d64_light_crpr.model \
+  --report data/features/tcg/reports/tcg_word2vec_d64_light_crpr_report.md \
+  --json-report data/features/tcg/reports/tcg_word2vec_d64_light_crpr_report.json \
+  --vector-size 64 --window 5 --min-count 1 --sg 1 --negative 5 \
+  --sample 1e-4 --epochs 3 --workers 0 --seed 20260528 --overwrite
+```
+
+## 12. TCG 分类数据集 D/E/F
+
+| 数据集 | 说明 | 列数 |
+|--------|------|------|
+| D | TCG 64 维 embedding + missing flag | 69 |
+| E | A (raw features) + TCG embedding | 160 |
+| F | C (raw + HCG) + TCG embedding | 418 |
+
+### 12.1 构建 D/E/F
+
+```bash
+PYTHONPATH=src python3 scripts/build_tcg_classification_features.py \
+  --tcg-emb-path data/features/tcg/node2vec/tcg_flow_node2vec_d64_light_crpr.parquet \
+  --output-dir data/features/tcg/classification/datasets \
+  --report data/features/tcg/reports/tcg_classification_feature_build_d64_light_crpr_report.md \
+  --json-report data/features/tcg/reports/tcg_classification_feature_build_d64_light_crpr_report.json
+```
+
+### 12.2 从 Hub 下载 D 并合成 E/F
+
+```bash
+# 从 ModelScope 下载 D 并自动合成 E/F
+PYTHONPATH=src python3 scripts/download_datasets_from_hub.py \
+  --hub modelscope \
+  --repo-id MarkTom/IP-Network-Flow-Graph \
+  --dataset-dir data/features/tcg/classification/datasets
+```
+
+### 12.3 数据集说明
+
+| 数据集 | 文件 | 大小 | 说明 |
+|--------|------|------|------|
+| D | `D_tcg_flow_node2vec_d64_light_crpr.parquet` | ~1.3 GB | TCG 64 维 flow embedding |
+| E | `E_raw_plus_tcg_d64_light_crpr.parquet` | ~1.8 GB | A + TCG 融合 |
+| F | `F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet` | ~4.4 GB | C + TCG 融合 |
+
+D/E/F 与 A 的 `record_id, target, split` 完全对齐。缺失 TCG embedding 的行以 0 填充，`tcg_emb_missing=1` 标记。
+
+### 12.4 上传数据集
+
+```bash
+PYTHONPATH=src python3 scripts/upload_datasets_to_hub.py \
+  --hub modelscope \
+  --repo-id MarkTom/IP-Network-Flow-Graph
+```
+
+## 13. TCG 分类器训练
+
+```bash
+# Smoke test
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/tcg/classification/datasets \
+  --output-dir data/features/tcg/classification/results_smoke \
+  --runs-dir runs/tcg_classification_smoke \
+  --feature-groups D,E,F \
+  --models dummy,decision_tree,lightgbm \
+  --sample-train 100000 --sample-valid 20000 --sample-test 20000 \
+  --tensorboard --progress --render-figures --seed 20260528 --resume
+
+# 全量
+PYTHONPATH=src conda run -n tugraph python scripts/train_hcg_classifiers.py \
+  --dataset-dir data/features/tcg/classification/datasets \
+  --output-dir data/features/tcg/classification/results \
+  --runs-dir runs/tcg_classification \
+  --feature-groups D,E,F \
+  --models dummy,decision_tree,lightgbm \
+  --no-memory-guard \
+  --tensorboard --progress --render-figures --seed 20260528 --resume
+```
