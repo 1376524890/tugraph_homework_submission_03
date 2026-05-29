@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train and evaluate HCG classification baselines for feature groups A/B/C."""
+"""Train and evaluate classification baselines for feature groups A/B/C/D/E/F."""
 
 from __future__ import annotations
 
@@ -64,6 +64,9 @@ DATASET_FILES = {
     "A": "A_raw_flow_features.parquet",
     "B": "B_hcg_flow_emb_256.parquet",
     "C": "C_raw_plus_hcg_flow_emb.parquet",
+    "D": "D_tcg_flow_node2vec_d64_light_crpr.parquet",
+    "E": "E_raw_plus_tcg_d64_light_crpr.parquet",
+    "F": "F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet",
 }
 META_COLUMNS = {"record_id", "target", "split", "src_endpoint", "dst_endpoint"}
 DEFAULT_MODEL_ALIASES = {
@@ -116,7 +119,7 @@ METRICS_LIVE_FIELDS = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train HCG classifiers for A/B/C classification features.")
+    parser = argparse.ArgumentParser(description="Train classifiers for A/B/C/D/E/F classification features.")
     parser.add_argument("--dataset-dir", type=Path, default=ROOT / "data/features/hcg/classification/datasets")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "data/features/hcg/classification/results")
     parser.add_argument("--runs-dir", type=Path, default=ROOT / "runs/hcg_classification")

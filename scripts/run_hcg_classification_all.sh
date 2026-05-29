@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ──────────────────────────────────────────────────────────
-# HCG Classification — 全量训练交互式脚本
+# Graph Feature Classification — 全量训练交互式脚本
 # ──────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -10,8 +10,10 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
 # ─────────────────── Hub 配置 ─────────────────────────────
-DEFAULT_HF_REPO="MarkTom/IP-Network-Flow-HCG"
-DEFAULT_MS_REPO="MarkTom/IP-Network-Flow-HCG"
+DEFAULT_HCG_HF_REPO="MarkTom/IP-Network-Flow-HCG"
+DEFAULT_HCG_MS_REPO="MarkTom/IP-Network-Flow-HCG"
+DEFAULT_TCG_HF_REPO="MarkTom/IP-Network-Flow-Graph"
+DEFAULT_TCG_MS_REPO="MarkTom/IP-Network-Flow-Graph"
 
 # ─────────────────────── 颜色定义 ─────────────────────────
 BOLD="\033[1m"
@@ -29,17 +31,25 @@ prompt()  { echo -e "${MAGENTA}[?]${RESET} $*"; }
 check_cmd() { command -v "$1" &>/dev/null; }
 
 # ─────────────────────── 常量 ─────────────────────────────
-DATASET_DIR="data/features/hcg/classification/datasets"
-OUTPUT_DIR="data/features/hcg/classification/results"
-RUNS_DIR="runs/hcg_classification"
+HCG_DATASET_DIR="data/features/hcg/classification/datasets"
+TCG_DATASET_DIR="data/features/tcg/classification/datasets"
+HCG_OUTPUT_DIR="data/features/hcg/classification/results"
+TCG_OUTPUT_DIR="data/features/tcg/classification/results"
+HCG_RUNS_DIR="runs/hcg_classification"
+TCG_RUNS_DIR="runs/tcg_classification"
+HCG_REPORT_DIR="data/features/hcg/classification/reports"
+TCG_REPORT_DIR="data/features/tcg/reports"
 SEED=20260525
 
-ALL_FEATURE_GROUPS=("A" "B" "C")
+ALL_FEATURE_GROUPS=("A" "B" "C" "D" "E" "F")
 
 declare -A DATASET_FILES=(
     ["A"]="A_raw_flow_features.parquet"
     ["B"]="B_hcg_flow_emb_256.parquet"
     ["C"]="C_raw_plus_hcg_flow_emb.parquet"
+    ["D"]="D_tcg_flow_node2vec_d64_light_crpr.parquet"
+    ["E"]="E_raw_plus_tcg_d64_light_crpr.parquet"
+    ["F"]="F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet"
 )
 
 declare -A MODEL_DESC=(
@@ -127,6 +137,21 @@ ask_multiselect() {
     done
 }
 
+dataset_dir_for_group() {
+    case "$1" in
+        A|B|C) echo "$HCG_DATASET_DIR" ;;
+        D|E|F) echo "$TCG_DATASET_DIR" ;;
+        *) return 1 ;;
+    esac
+}
+
+dataset_path_for_group() {
+    local grp="$1"
+    local dir
+    dir="$(dataset_dir_for_group "$grp")"
+    echo "${dir}/${DATASET_FILES[$grp]}"
+}
+
 # ──────────────────── 环境检查 ────────────────────────────
 check_environment() {
     header "环境检查"
@@ -182,7 +207,8 @@ check_environment() {
     info "扫描数据集文件..."
     local all_exist=true
     for grp in "${ALL_FEATURE_GROUPS[@]}"; do
-        local fpath="${DATASET_DIR}/${DATASET_FILES[$grp]}"
+        local fpath
+        fpath="$(dataset_path_for_group "$grp")"
         if [ -f "$fpath" ]; then
             local size
             size="$(du -h "$fpath" 2>/dev/null | cut -f1)"
@@ -195,54 +221,11 @@ check_environment() {
 
     if ! $all_exist; then
         warn "某些特征数据集缺失"
-
-        # Check if A or B are missing - offer download
-        local need_download=false
-        if [ ! -f "${DATASET_DIR}/A_raw_flow_features.parquet" ] || [ ! -f "${DATASET_DIR}/B_hcg_flow_emb_256.parquet" ]; then
-            need_download=true
-        fi
-
-        if $need_download; then
-            echo ""
-            info "核心数据集 A/B 缺失，需要从 Hub 下载"
-            if ask_yesno "是否从 Hub 下载数据集?" "y"; then
-                if ! download_datasets; then
-                    err "数据集下载失败"
-                    return 1
-                fi
-            else
-                err "缺少核心数据集 A/B，无法继续"
-                return 1
-            fi
-        fi
-
-        # Now check if C needs to be synthesized
-        if [ ! -f "${DATASET_DIR}/C_raw_plus_hcg_flow_emb.parquet" ]; then
-            if [ -f "${DATASET_DIR}/A_raw_flow_features.parquet" ] && [ -f "${DATASET_DIR}/B_hcg_flow_emb_256.parquet" ]; then
-                echo ""
-                info "数据集 C 可由 A + B 自动拼接生成"
-                if ask_yesno "是否现在拼接生成数据集 C?" "y"; then
-                    info "拼接 A + B -> C..."
-                    PYTHONPATH=src python3 -c "
-import pandas as pd
-from pathlib import Path
-
-dataset_dir = Path('${DATASET_DIR}')
-a = pd.read_parquet(dataset_dir / 'A_raw_flow_features.parquet')
-b = pd.read_parquet(dataset_dir / 'B_hcg_flow_emb_256.parquet')
-meta_cols = ['record_id', 'target', 'split', 'src_endpoint', 'dst_endpoint']
-b_feat = b.drop(columns=meta_cols)
-c = pd.concat([a, b_feat], axis=1)
-out = dataset_dir / 'C_raw_plus_hcg_flow_emb.parquet'
-c.to_parquet(out, compression='snappy', index=False)
-print(f'C written: {len(c)} rows, {len(c.columns)} columns, {out.stat().st_size/1024/1024:.0f} MiB')
-" || {
-                        err "拼接生成数据集 C 失败"
-                        return 1
-                    }
-                    ok "数据集 C 已生成"
-                fi
-            fi
+        echo ""
+        info "将自动准备 A/B/C 和 D/E/F；D 从 ModelScope/HuggingFace 获取后合成 E/F"
+        if ! download_datasets; then
+            err "数据集准备失败"
+            return 1
         fi
     fi
 
@@ -262,27 +245,20 @@ print(f'C written: {len(c)} rows, {len(c.columns)} columns, {out.stat().st_size/
 download_datasets() {
     header "数据集下载"
 
-    local hub_options=("huggingface — HuggingFace Hub (推荐)" "modelscope — ModelScope (魔搭社区)")
+    local selected_hub="${DATA_HUB:-modelscope}"
+    local hcg_repo_id tcg_repo_id
+    if [ "$selected_hub" = "huggingface" ]; then
+        hcg_repo_id="${HCG_REPO_ID:-$DEFAULT_HCG_HF_REPO}"
+        tcg_repo_id="${TCG_REPO_ID:-$DEFAULT_TCG_HF_REPO}"
+    else
+        selected_hub="modelscope"
+        hcg_repo_id="${HCG_REPO_ID:-$DEFAULT_HCG_MS_REPO}"
+        tcg_repo_id="${TCG_REPO_ID:-$DEFAULT_TCG_MS_REPO}"
+    fi
 
-    local selected_hub=""
-    ask_selection "选择数据源:" hub_options selected_hub
-    selected_hub="${selected_hub%% *}"
-
-    local repo_id=""
-    case "$selected_hub" in
-        huggingface)
-            echo ""
-            read -r -p "$(echo -e "${MAGENTA}[?]${RESET} HuggingFace 仓库 ID [默认: ${DEFAULT_HF_REPO}]: ")" repo_id
-            repo_id="${repo_id:-$DEFAULT_HF_REPO}"
-            ;;
-        modelscope)
-            echo ""
-            read -r -p "$(echo -e "${MAGENTA}[?]${RESET} ModelScope 仓库 ID [默认: ${DEFAULT_MS_REPO}]: ")" repo_id
-            repo_id="${repo_id:-$DEFAULT_MS_REPO}"
-            ;;
-    esac
-
-    ok "数据源: ${selected_hub}/${repo_id}"
+    ok "数据源: ${selected_hub}"
+    info "HCG 仓库: ${hcg_repo_id}"
+    info "TCG 仓库: ${tcg_repo_id}"
 
     # Check dependencies
     case "$selected_hub" in
@@ -310,7 +286,9 @@ download_datasets() {
             # 检查 ModelScope 登录状态
             if [ -z "${MODELSCOPE_API_TOKEN:-}" ] && ! python3 -c "
 from modelscope.hub.api import HubApi
-HubApi().repo_exists('${repo_id}', repo_type='dataset')
+api = HubApi()
+api.repo_exists('${hcg_repo_id}', repo_type='dataset')
+api.repo_exists('${tcg_repo_id}', repo_type='dataset')
 " 2>/dev/null; then
                 warn "ModelScope 未登录（私有仓库需要认证）"
                 if ask_yesno "是否现在登录 ModelScope?" "y"; then
@@ -334,12 +312,23 @@ HubApi().repo_exists('${repo_id}', repo_type='dataset')
             ;;
     esac
 
-    # Download
-    info "开始下载数据集..."
+    if [ ! -f "${HCG_DATASET_DIR}/A_raw_flow_features.parquet" ] \
+        || [ ! -f "${HCG_DATASET_DIR}/B_hcg_flow_emb_256.parquet" ] \
+        || [ ! -f "${HCG_DATASET_DIR}/C_raw_plus_hcg_flow_emb.parquet" ]; then
+        info "准备 A/B/C..."
+        PYTHONPATH=src python3 scripts/download_datasets_from_hub.py \
+            --hub "$selected_hub" \
+            --repo-id "$hcg_repo_id" \
+            --dataset-dir "$HCG_DATASET_DIR"
+    else
+        ok "A/B/C 已存在"
+    fi
+
+    info "准备 D/E/F..."
     PYTHONPATH=src python3 scripts/download_datasets_from_hub.py \
         --hub "$selected_hub" \
-        --repo-id "$repo_id" \
-        --dataset-dir "$DATASET_DIR"
+        --repo-id "$tcg_repo_id" \
+        --dataset-dir "$TCG_DATASET_DIR"
 
     local rc=$?
     if [ $rc -eq 0 ]; then
@@ -357,49 +346,51 @@ HubApi().repo_exists('${repo_id}', repo_type='dataset')
 run_data_integrity_check() {
     header "数据完整性检查"
 
-    local groups_to_check=()
-    for grp in "${ALL_FEATURE_GROUPS[@]}"; do
-        local fpath="${DATASET_DIR}/${DATASET_FILES[$grp]}"
-        [ -f "$fpath" ] && groups_to_check+=("$grp")
-    done
+    local rc=0
+    local hcg_json="${HCG_REPORT_DIR}/hcg_classification_feature_check_report.json"
+    local tcg_json="${TCG_REPORT_DIR}/tcg_classification_feature_check_report.json"
 
-    if [ ${#groups_to_check[@]} -eq 0 ]; then
-        err "没有可用的数据集文件"
-        return 1
+    info "检查 A/B/C..."
+    if ! env PYTHONPATH=src python3 scripts/check_hcg_classification_features.py \
+        --dataset-dir "$HCG_DATASET_DIR" \
+        --report "${HCG_REPORT_DIR}/hcg_classification_feature_check_report.md" \
+        --json-report "$hcg_json"; then
+        rc=1
     fi
 
-    local groups_str
-    groups_str="$(IFS=,; echo "${groups_to_check[*]}")"
-    info "检查特征组: ${groups_str}"
-
-    PYTHONPATH=src python3 scripts/check_hcg_classification_features.py \
-        --dataset-dir "$DATASET_DIR" \
-        --report "data/features/hcg/classification/reports/hcg_classification_feature_check_report.md" \
-        --json-report "data/features/hcg/classification/reports/hcg_classification_feature_check_report.json"
-    local rc=$?
+    info "检查 D/E/F 及与 A/C 的 flow 对齐..."
+    if ! env PYTHONPATH=src python3 scripts/check_tcg_classification_features.py \
+        --a-path "${HCG_DATASET_DIR}/A_raw_flow_features.parquet" \
+        --c-path "${HCG_DATASET_DIR}/C_raw_plus_hcg_flow_emb.parquet" \
+        --dataset-dir "$TCG_DATASET_DIR" \
+        --report "${TCG_REPORT_DIR}/tcg_classification_feature_check_report.md" \
+        --json-report "$tcg_json"; then
+        rc=1
+    fi
 
     if [ $rc -eq 0 ]; then
         ok "数据完整性检查通过"
     else
         warn "数据完整性检查发现问题 (exit code: $rc)，详见报告"
-        if [ -f "data/features/hcg/classification/reports/hcg_classification_feature_check_report.json" ]; then
-            echo ""
-            info "快速摘要:"
-            python3 -c "
+        echo ""
+        info "快速摘要:"
+        HCG_JSON="$hcg_json" TCG_JSON="$tcg_json" python3 -c "
 import json
-with open('data/features/hcg/classification/reports/hcg_classification_feature_check_report.json') as f:
-    r = json.load(f)
-print(f\"  overall_status: {r['overall_status']}\")
-print(f\"  row_count_A: {r['metrics'].get('row_count_A', 'N/A')}\")
-print(f\"  target_class_count: {r['metrics'].get('target_class_count', 'N/A')}\")
-print(f\"  nan_count: {r['metrics'].get('nan_count', 'N/A')}\")
-print(f\"  inf_count: {r['metrics'].get('inf_count', 'N/A')}\")
-for k, v in r['checks'].items():
-    status = 'PASS' if v else 'FAIL'
-    color = '\033[32m' if v else '\033[31m'
-    print(f\"  {color}{status}\033[0m  {k}\")
+import os
+for label, path in [('HCG', os.environ['HCG_JSON']), ('TCG', os.environ['TCG_JSON'])]:
+    if not os.path.exists(path):
+        print(f'  {label}: report missing')
+        continue
+    with open(path) as f:
+        r = json.load(f)
+    print(f\"  {label}: {r.get('overall_status', 'N/A')}\")
+    if label == 'TCG':
+        for name, item in r.get('datasets', {}).items():
+            print(f\"    {name}: {item.get('status', 'N/A')} rows={item.get('rows', 'N/A')} columns={item.get('columns', 'N/A')}\")
+    else:
+        print(f\"    row_count_A: {r.get('metrics', {}).get('row_count_A', 'N/A')}\")
+        print(f\"    target_class_count: {r.get('metrics', {}).get('target_class_count', 'N/A')}\")
 "
-        fi
         if ! ask_yesno "数据检查未全部通过，是否继续训练?" "n"; then
             return 1
         fi
@@ -416,7 +407,7 @@ interactive_config() {
     # 1. 选择特征组
     local available_groups=()
     for grp in "${ALL_FEATURE_GROUPS[@]}"; do
-        [ -f "${DATASET_DIR}/${DATASET_FILES[$grp]}" ] && available_groups+=("$grp")
+        [ -f "$(dataset_path_for_group "$grp")" ] && available_groups+=("$grp")
     done
     if [ ${#available_groups[@]} -eq 0 ]; then
         err "无可用数据集"
@@ -429,6 +420,9 @@ interactive_config() {
             A) group_descriptions+=("A — 原始流特征 (raw features only)") ;;
             B) group_descriptions+=("B — HCG 图嵌入 256 维 (embedding only)") ;;
             C) group_descriptions+=("C — 原始特征 + HCG 嵌入拼接 (raw + embedding)") ;;
+            D) group_descriptions+=("D — TCG Flow 图嵌入 64 维 (embedding only)") ;;
+            E) group_descriptions+=("E — 原始特征 + TCG 嵌入拼接 (raw + TCG)") ;;
+            F) group_descriptions+=("F — 原始特征 + HCG 嵌入 + TCG 嵌入拼接") ;;
         esac
     done
 
@@ -682,9 +676,10 @@ show_config_summary() {
     echo -e "  ${BOLD}任务隔离${RESET}      ${ISOLATE_TASKS}"
     echo -e "  ${BOLD}模式${RESET}          $([ "$FORCE" = true ] && echo 'force (覆盖)' || echo 'resume (跳过已完成)')"
     echo -e "  ${BOLD}Seed${RESET}          ${SEED}"
-    echo -e "  ${BOLD}数据集目录${RESET}    ${DATASET_DIR}"
-    echo -e "  ${BOLD}输出目录${RESET}      ${OUTPUT_DIR}"
-    echo -e "  ${BOLD}Runs 目录${RESET}      ${RUNS_DIR}"
+    echo -e "  ${BOLD}A/B/C 数据集目录${RESET} ${HCG_DATASET_DIR}"
+    echo -e "  ${BOLD}D/E/F 数据集目录${RESET} ${TCG_DATASET_DIR}"
+    echo -e "  ${BOLD}A/B/C 输出目录${RESET}   ${HCG_OUTPUT_DIR}"
+    echo -e "  ${BOLD}D/E/F 输出目录${RESET}   ${TCG_OUTPUT_DIR}"
     echo ""
 }
 
@@ -692,52 +687,22 @@ show_config_summary() {
 run_training() {
     header "开始训练"
 
-    local cmd=(
-        python3
-    )
-    # Build PYTHONPATH prefix
-    local full_cmd=()
-    full_cmd+=(env CUDA_VISIBLE_DEVICES=4,5,6,7 PYTHONPATH=src)
-    full_cmd+=(python3 scripts/train_hcg_classifiers.py)
-    full_cmd+=(--dataset-dir "$DATASET_DIR")
-    full_cmd+=(--output-dir "$OUTPUT_DIR")
-    full_cmd+=(--runs-dir "$RUNS_DIR")
-    full_cmd+=(--feature-groups "$(IFS=,; echo "${FEATURE_GROUPS[*]}")")
-    full_cmd+=(--models "$(IFS=,; echo "${MODELS[*]}")")
-    full_cmd+=(--seed "$SEED")
-    full_cmd+=(--sample-train "$SAMPLE_TRAIN")
-    full_cmd+=(--sample-valid "$SAMPLE_VALID")
-    full_cmd+=(--sample-test "$SAMPLE_TEST")
-    full_cmd+=(--knn-train-sample "$KNN_TRAIN_SAMPLE")
-    full_cmd+=(--knn-test-sample "$KNN_TEST_SAMPLE")
-    full_cmd+=(--knn-backend "$KNN_BACKEND")
-    full_cmd+=(--logistic-backend "$LOGISTIC_BACKEND")
-    full_cmd+=(--lightgbm-device "$LIGHTGBM_DEVICE")
+    local hcg_groups=()
+    local tcg_groups=()
+    for grp in "${FEATURE_GROUPS[@]}"; do
+        case "$grp" in
+            A|B|C) hcg_groups+=("$grp") ;;
+            D|E|F) tcg_groups+=("$grp") ;;
+        esac
+    done
 
-    if [ "$KNN_MODE" = "full" ] && [ "$KNN_BACKEND" = "sklearn" ]; then
-        full_cmd+=(--allow-full-knn)
+    echo -e "${CYAN}${BOLD}将执行:${RESET}"
+    if [ ${#hcg_groups[@]} -gt 0 ]; then
+        echo "  A/B/C: $(IFS=,; echo "${hcg_groups[*]}") -> ${HCG_OUTPUT_DIR}"
     fi
-    if [ "$TENSORBOARD" = true ]; then
-        full_cmd+=(--tensorboard)
-    else
-        full_cmd+=(--no-tensorboard)
+    if [ ${#tcg_groups[@]} -gt 0 ]; then
+        echo "  D/E/F: $(IFS=,; echo "${tcg_groups[*]}") -> ${TCG_OUTPUT_DIR}"
     fi
-    if [ "$RENDER_FIGURES" = true ]; then
-        full_cmd+=(--render-figures)
-    fi
-    if [ "$ISOLATE_TASKS" = true ]; then
-        full_cmd+=(--isolate-tasks)
-    else
-        full_cmd+=(--no-isolate-tasks)
-    fi
-    if [ "$FORCE" = true ]; then
-        full_cmd+=(--force)
-    fi
-
-    full_cmd+=(--progress)
-
-    echo -e "${CYAN}${BOLD}执行命令:${RESET}"
-    echo "  ${full_cmd[*]}"
     echo ""
 
     if ! ask_yesno "确认开始训练?" "y"; then
@@ -745,13 +710,71 @@ run_training() {
         return 0
     fi
 
+    run_training_batch() {
+        local label="$1"; shift
+        local dataset_dir="$1"; shift
+        local output_dir="$1"; shift
+        local runs_dir="$1"; shift
+        local groups=("$@")
+        if [ ${#groups[@]} -eq 0 ]; then
+            return 0
+        fi
+
+        local full_cmd=()
+        full_cmd+=(env CUDA_VISIBLE_DEVICES=4,5,6,7 PYTHONPATH=src)
+        full_cmd+=(python3 scripts/train_hcg_classifiers.py)
+        full_cmd+=(--dataset-dir "$dataset_dir")
+        full_cmd+=(--output-dir "$output_dir")
+        full_cmd+=(--runs-dir "$runs_dir")
+        full_cmd+=(--feature-groups "$(IFS=,; echo "${groups[*]}")")
+        full_cmd+=(--models "$(IFS=,; echo "${MODELS[*]}")")
+        full_cmd+=(--seed "$SEED")
+        full_cmd+=(--sample-train "$SAMPLE_TRAIN")
+        full_cmd+=(--sample-valid "$SAMPLE_VALID")
+        full_cmd+=(--sample-test "$SAMPLE_TEST")
+        full_cmd+=(--knn-train-sample "$KNN_TRAIN_SAMPLE")
+        full_cmd+=(--knn-test-sample "$KNN_TEST_SAMPLE")
+        full_cmd+=(--knn-backend "$KNN_BACKEND")
+        full_cmd+=(--logistic-backend "$LOGISTIC_BACKEND")
+        full_cmd+=(--lightgbm-device "$LIGHTGBM_DEVICE")
+
+        if [ "$KNN_MODE" = "full" ] && [ "$KNN_BACKEND" = "sklearn" ]; then
+            full_cmd+=(--allow-full-knn)
+        fi
+        if [ "$TENSORBOARD" = true ]; then
+            full_cmd+=(--tensorboard)
+        else
+            full_cmd+=(--no-tensorboard)
+        fi
+        if [ "$RENDER_FIGURES" = true ]; then
+            full_cmd+=(--render-figures)
+        fi
+        if [ "$ISOLATE_TASKS" = true ]; then
+            full_cmd+=(--isolate-tasks)
+        else
+            full_cmd+=(--no-isolate-tasks)
+        fi
+        if [ "$FORCE" = true ]; then
+            full_cmd+=(--force)
+        fi
+        full_cmd+=(--progress)
+
+        echo -e "${CYAN}${BOLD}执行 ${label}:${RESET}"
+        echo "  ${full_cmd[*]}"
+        echo ""
+        "${full_cmd[@]}"
+    }
+
+
     echo ""
     info "训练开始: $(date '+%Y-%m-%d %H:%M:%S')"
     local start_ts=$SECONDS
 
-    # Run training
-    "${full_cmd[@]}"
-    local rc=$?
+    local rc=0
+    run_training_batch "A/B/C" "$HCG_DATASET_DIR" "$HCG_OUTPUT_DIR" "$HCG_RUNS_DIR" "${hcg_groups[@]}" || rc=$?
+    if [ $rc -eq 0 ]; then
+        run_training_batch "D/E/F" "$TCG_DATASET_DIR" "$TCG_OUTPUT_DIR" "$TCG_RUNS_DIR" "${tcg_groups[@]}" || rc=$?
+    fi
 
     local elapsed=$((SECONDS - start_ts))
     local elapsed_fmt
@@ -760,11 +783,17 @@ run_training() {
     echo ""
     if [ $rc -eq 0 ]; then
         ok "训练完成! 耗时: ${elapsed_fmt}"
-        info "结果目录: ${OUTPUT_DIR}"
-        if [ -f "${OUTPUT_DIR}/classifier_summary.md" ]; then
+        info "A/B/C 结果目录: ${HCG_OUTPUT_DIR}"
+        info "D/E/F 结果目录: ${TCG_OUTPUT_DIR}"
+        if [ -f "${HCG_OUTPUT_DIR}/classifier_summary.md" ]; then
             echo ""
-            info "快速结果预览:"
-            head -20 "${OUTPUT_DIR}/classifier_summary.md"
+            info "A/B/C 快速结果预览:"
+            head -20 "${HCG_OUTPUT_DIR}/classifier_summary.md"
+        fi
+        if [ -f "${TCG_OUTPUT_DIR}/classifier_summary.md" ]; then
+            echo ""
+            info "D/E/F 快速结果预览:"
+            head -20 "${TCG_OUTPUT_DIR}/classifier_summary.md"
         fi
     else
         err "训练过程出错 (exit code: $rc)，耗时: ${elapsed_fmt}"
@@ -778,7 +807,7 @@ run_training() {
 main() {
     echo -e "${BOLD}${CYAN}"
     echo "╔══════════════════════════════════════════════════╗"
-    echo "║     HCG 分类模型训练 — 交互式全量运行脚本       ║"
+    echo "║   图特征分类模型训练 — 交互式全量运行脚本       ║"
     echo "╚══════════════════════════════════════════════════╝"
     echo -e "${RESET}"
 

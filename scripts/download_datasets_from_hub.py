@@ -126,8 +126,8 @@ def synthesize_dataset_c(dataset_dir: Path):
 
 def synthesize_ef(dataset_dir: Path):
     """Synthesize E and F from A/C + D (TCG)."""
-    import numpy as np
     import pandas as pd
+    import pyarrow as pa
     import pyarrow.parquet as pq
 
     d_path = dataset_dir / "D_tcg_flow_node2vec_d64_light_crpr.parquet"
@@ -140,33 +140,55 @@ def synthesize_ef(dataset_dir: Path):
         print("  WARNING: D not found, cannot synthesize E/F")
         return
 
-    d = pd.read_parquet(d_path)
-    meta_cols = ['record_id', 'target', 'split', 'src_endpoint', 'dst_endpoint']
-    d_tcg_cols = [c for c in d.columns if c.startswith('tcg_emb_') or c.startswith('emb_')]
+    d_pf = pq.ParquetFile(d_path)
+    d_cols = d_pf.schema_arrow.names
+    d_tcg_cols = [
+        c for c in d_cols
+        if c.startswith("emb_") or c.startswith("tcg_emb_")
+    ]
+    if not d_tcg_cols:
+        print("  WARNING: D has no TCG embedding columns, cannot synthesize E/F")
+        return
+    d = pq.read_table(d_path, columns=["record_id", *d_tcg_cols]).to_pandas()
+    d = d.drop_duplicates("record_id", keep="first").set_index("record_id")
+
+    def write_joined(source_path: Path, output_path: Path, label: str):
+        source_pf = pq.ParquetFile(source_path)
+        writer = None
+        rows = 0
+        for idx in range(source_pf.metadata.num_row_groups):
+            chunk = source_pf.read_row_group(idx).to_pandas()
+            joined = chunk.join(d, on="record_id")
+            fill_cols = [c for c in d_tcg_cols if c in joined.columns]
+            emb_value_cols = [c for c in fill_cols if c != "tcg_emb_missing"]
+            unmatched = joined[emb_value_cols[0]].isna() if emb_value_cols else pd.Series(False, index=joined.index)
+            if "tcg_emb_missing" in joined.columns:
+                joined["tcg_emb_missing"] = joined["tcg_emb_missing"].fillna(1).astype("int8")
+            else:
+                joined["tcg_emb_missing"] = unmatched.astype("int8")
+            joined[fill_cols] = joined[fill_cols].fillna(0)
+            table = pa.Table.from_pandas(joined, preserve_index=False)
+            if writer is None:
+                writer = pq.ParquetWriter(str(output_path), table.schema)
+            writer.write_table(table)
+            rows += len(joined)
+            if (idx + 1) % 10 == 0:
+                print(f"    {label} row group {idx + 1}: {rows} rows", flush=True)
+        if writer is not None:
+            writer.close()
+        print(f"  Synthesized {label}: {rows} rows, {output_path.stat().st_size / 1024 / 1024:.1f} MB")
 
     if not e_path.exists():
         if a_path.exists():
             print("  Synthesizing E from A + D...")
-            a = pd.read_parquet(a_path)
-            e = a.merge(d[['record_id'] + d_tcg_cols], on='record_id', how='left')
-            for col in d_tcg_cols:
-                if col in e.columns:
-                    e[col] = e[col].fillna(0)
-            e.to_parquet(e_path, compression='snappy', index=False)
-            print(f"  Synthesized E: {len(e)} rows, {len(e.columns)} columns")
+            write_joined(a_path, e_path, "E")
         else:
             print("  WARNING: A not found, cannot synthesize E")
 
     if not f_path.exists():
         if c_path.exists():
             print("  Synthesizing F from C + D...")
-            c = pd.read_parquet(c_path)
-            f = c.merge(d[['record_id'] + d_tcg_cols], on='record_id', how='left')
-            for col in d_tcg_cols:
-                if col in f.columns:
-                    f[col] = f[col].fillna(0)
-            f.to_parquet(f_path, compression='snappy', index=False)
-            print(f"  Synthesized F: {len(f)} rows, {len(f.columns)} columns")
+            write_joined(c_path, f_path, "F")
         else:
             print("  WARNING: C not found, cannot synthesize F")
 
