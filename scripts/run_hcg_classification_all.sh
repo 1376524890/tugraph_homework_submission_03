@@ -10,8 +10,8 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
 # ─────────────────── Hub 配置 ─────────────────────────────
-DEFAULT_HCG_HF_REPO="MarkTom/IP-Network-Flow-HCG"
-DEFAULT_HCG_MS_REPO="MarkTom/IP-Network-Flow-HCG"
+DEFAULT_HCG_HF_REPO="MarkTom/IP-Network-Flow-Graph"
+DEFAULT_HCG_MS_REPO="MarkTom/IP-Network-Flow-Graph"
 DEFAULT_TCG_HF_REPO="MarkTom/IP-Network-Flow-Graph"
 DEFAULT_TCG_MS_REPO="MarkTom/IP-Network-Flow-Graph"
 
@@ -222,7 +222,7 @@ check_environment() {
     if ! $all_exist; then
         warn "某些特征数据集缺失"
         echo ""
-        info "将自动准备 A/B/C 和 D/E/F；D 从 ModelScope/HuggingFace 获取后合成 E/F"
+        info "将自动准备 A/B/C 和 D/E/F；HCG 与 TCG 默认从同一 Hub 仓库获取"
         if ! download_datasets; then
             err "数据集准备失败"
             return 1
@@ -319,6 +319,7 @@ api.repo_exists('${tcg_repo_id}', repo_type='dataset')
         PYTHONPATH=src python3 scripts/download_datasets_from_hub.py \
             --hub "$selected_hub" \
             --repo-id "$hcg_repo_id" \
+            --dataset-kind hcg \
             --dataset-dir "$HCG_DATASET_DIR"
     else
         ok "A/B/C 已存在"
@@ -328,6 +329,7 @@ api.repo_exists('${tcg_repo_id}', repo_type='dataset')
     PYTHONPATH=src python3 scripts/download_datasets_from_hub.py \
         --hub "$selected_hub" \
         --repo-id "$tcg_repo_id" \
+        --dataset-kind tcg \
         --dataset-dir "$TCG_DATASET_DIR"
 
     local rc=$?

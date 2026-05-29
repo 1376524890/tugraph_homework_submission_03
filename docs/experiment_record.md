@@ -2579,13 +2579,13 @@ B/C 组没有产生有效模型指标：
 
 ### ModelScope 数据集上传
 
-数据集 A、B 已上传至 ModelScope 仓库 `MarkTom/IP-Network-Flow-HCG`。
+数据集 A、B 已上传至 ModelScope 仓库 `MarkTom/IP-Network-Flow-Graph`。
 
 ```bash
 # 上传命令
 PYTHONPATH=src python3 scripts/upload_datasets_to_hub.py \
   --hub modelscope \
-  --repo-id MarkTom/IP-Network-Flow-HCG \
+  --repo-id MarkTom/IP-Network-Flow-Graph \
   --dataset-dir data/features/hcg/classification/datasets
 ```
 
@@ -2603,8 +2603,7 @@ Dataset C 由 A + B 本地拼接生成，无需上传。
 
 | 平台 | 地址 |
 | --- | --- |
-| ModelScope | https://modelscope.cn/datasets/MarkTom/IP-Network-Flow-HCG |
-| HuggingFace | https://huggingface.co/datasets/MarkTom/IP-Network-Flow-HCG |
+| ModelScope | https://www.modelscope.cn/datasets/MarkTom/IP-Network-Flow-Graph |
 
 ### 脚本与文档仓库绑定
 
@@ -2612,13 +2611,13 @@ Dataset C 由 A + B 本地拼接生成，无需上传。
 
 ```diff
 -DEFAULT_HF_REPO="tugraph-hcg-classification"
-+DEFAULT_HF_REPO="MarkTom/IP-Network-Flow-HCG"
++DEFAULT_HF_REPO="MarkTom/IP-Network-Flow-Graph"
 
 -DEFAULT_MS_REPO="tugraph-hcg-classification"
-+DEFAULT_MS_REPO="MarkTom/IP-Network-Flow-HCG"
++DEFAULT_MS_REPO="MarkTom/IP-Network-Flow-Graph"
 ```
 
-`README.md` 第 7 节（数据集获取）已更新，将所有占位符 `<username>/tugraph-hcg-classification` 替换为 `MarkTom/IP-Network-Flow-HCG`，并添加数据集地址表格。
+`README.md` 第 7 节（数据集获取）已更新，将所有占位符 `<username>/tugraph-hcg-classification` 替换为 `MarkTom/IP-Network-Flow-Graph`，并添加数据集地址表格。
 
 ### 分类实验结果
 
@@ -2692,7 +2691,7 @@ lightgbm.basic.LightGBMError: [CUDA] out of memory (cuda_tree.cpp line 124)
 
 ### 问题 1：ModelScope 下载 404
 
-`download_datasets_from_hub.py` 调用 `snapshot_download` 时未指定 `repo_type`，默认为 `"model"`，但仓库 `MarkTom/IP-Network-Flow-HCG` 是 dataset 类型，导致 404。
+`download_datasets_from_hub.py` 调用 `snapshot_download` 时未指定 `repo_type`，默认为 `"model"`，但仓库 `MarkTom/IP-Network-Flow-Graph` 是 dataset 类型，导致 404。
 
 修复：`scripts/download_datasets_from_hub.py:115` 添加 `repo_type="dataset"`。
 
@@ -2896,11 +2895,27 @@ HCG 端点嵌入生成流程：
 
 ### 数据与代码
 
-- 模型和数据集已上传至 HuggingFace/ModelScope：`MarkTom/IP-Network-Flow-HCG`
+- 模型和数据集已上传至 ModelScope：`MarkTom/IP-Network-Flow-Graph`
 - 分类结果目录（gitignored）：`data/features/hcg/classification/results/`
 - 本记录中的图片副本：`docs/figures/`
 
 ## 2026-05-29 TCG D64-light CR+PR Node2Vec + Word2Vec + D/E/F 数据集构建
+
+### ModelScope 统一仓库核对与脚本更新
+
+2026-05-29 通过 ModelScope SDK 核对 `MarkTom/IP-Network-Flow-Graph`：
+
+- 仓库存在，名称为 `IP-Network-Flow-Graph`，最近提交 `a748e4aa`。
+- HCG 分类文件：`A_raw_flow_features.parquet`、`B_hcg_flow_emb_256.parquet`。
+- TCG 分类文件：`D_tcg_flow_node2vec_d64_light_crpr.parquet`、`E_raw_plus_tcg_d64_light_crpr.parquet`、`F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet`。
+- 另有 TCG embedding 源文件新命名：`tcg_flow_node2vec_d64_light_crpr.parquet`。
+
+同步修改：
+
+- `scripts/download_datasets_from_hub.py` 默认仓库改为 `MarkTom/IP-Network-Flow-Graph`，新增 `--dataset-kind hcg|tcg|auto`，避免用 `Graph` 误判 TCG。
+- `scripts/run_hcg_classification_all.sh` 的 HCG/TCG 默认仓库统一为 `MarkTom/IP-Network-Flow-Graph`，下载时显式传入 `--dataset-kind`。
+- `scripts/upload_datasets_to_hub.py` 改为按本地存在的 A/B/C/D/E/F 自动上传，并生成统一数据集 README。
+- `README.md` 第 7 节和第 12 节已同步为统一 ModelScope 仓库地址。
 
 ### 目标
 

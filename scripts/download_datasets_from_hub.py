@@ -3,15 +3,15 @@
 Download classification datasets from HuggingFace Hub or ModelScope.
 
 Supports:
-- HCG datasets (A, B) from MarkTom/IP-Network-Flow-HCG, with C auto-synthesized
-- TCG dataset (D) from MarkTom/IP-Network-Flow-Graph, with E/F auto-synthesized
+- HCG datasets (A, B) from MarkTom/IP-Network-Flow-Graph, with C auto-synthesized
+- TCG datasets (D, E, F) from MarkTom/IP-Network-Flow-Graph
 
 Usage:
     # Download HCG datasets (A, B, auto-synthesize C)
-    PYTHONPATH=src python3 scripts/download_datasets_from_hub.py --hub modelscope --repo-id MarkTom/IP-Network-Flow-HCG
+    PYTHONPATH=src python3 scripts/download_datasets_from_hub.py --hub modelscope --repo-id MarkTom/IP-Network-Flow-Graph
 
-    # Download TCG dataset (D, auto-synthesize E, F)
-    PYTHONPATH=src python3 scripts/download_datasets_from_hub.py --hub modelscope --repo-id MarkTom/IP-Network-Flow-Graph --dataset-dir data/features/tcg/classification/datasets
+    # Download TCG datasets (D, E, F)
+    PYTHONPATH=src python3 scripts/download_datasets_from_hub.py --hub modelscope --repo-id MarkTom/IP-Network-Flow-Graph --dataset-kind tcg
 """
 
 import argparse
@@ -28,8 +28,14 @@ DATASET_MD5 = {
     "B_hcg_flow_emb_256.parquet": "4b34e01f91ac37f186bb2eaf3e345258",
 }
 
+DEFAULT_REPO_ID = "MarkTom/IP-Network-Flow-Graph"
+
 HCG_FILES = ["A_raw_flow_features.parquet", "B_hcg_flow_emb_256.parquet"]
-TCG_FILES = ["D_tcg_flow_node2vec_d64_light_crpr.parquet"]
+TCG_FILES = [
+    "D_tcg_flow_node2vec_d64_light_crpr.parquet",
+    "E_raw_plus_tcg_d64_light_crpr.parquet",
+    "F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet",
+]
 
 
 def _md5(filepath: Path) -> str:
@@ -136,6 +142,10 @@ def synthesize_ef(dataset_dir: Path):
     e_path = dataset_dir / "E_raw_plus_tcg_d64_light_crpr.parquet"
     f_path = dataset_dir / "F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet"
 
+    if e_path.exists() and f_path.exists():
+        print("  E/F already exist, skipping synthesis")
+        return
+
     if not d_path.exists():
         print("  WARNING: D not found, cannot synthesize E/F")
         return
@@ -196,13 +206,30 @@ def synthesize_ef(dataset_dir: Path):
 def main():
     parser = argparse.ArgumentParser(description="Download classification datasets from Hub")
     parser.add_argument("--hub", choices=["huggingface", "modelscope"], default="modelscope")
-    parser.add_argument("--repo-id", required=True)
+    parser.add_argument("--repo-id", default=DEFAULT_REPO_ID)
+    parser.add_argument(
+        "--dataset-kind",
+        choices=["auto", "hcg", "tcg"],
+        default="auto",
+        help="Dataset family to download. Use this when HCG and TCG live in the same repo.",
+    )
     parser.add_argument("--dataset-dir", default=None, help="Default: auto-detect based on repo")
     parser.add_argument("--skip-synthesis", action="store_true")
     args = parser.parse_args()
 
-    # Auto-detect dataset type from repo-id
-    is_tcg = "Graph" in args.repo_id or "TCG" in args.repo_id or "tcg" in args.repo_id
+    dataset_kind = args.dataset_kind
+    if dataset_kind == "auto":
+        dataset_dir_hint = (args.dataset_dir or "").lower()
+        repo_hint = args.repo_id.lower()
+        if "/tcg/" in dataset_dir_hint or dataset_dir_hint.endswith("/tcg") or "tcg" in dataset_dir_hint:
+            dataset_kind = "tcg"
+        elif "/hcg/" in dataset_dir_hint or dataset_dir_hint.endswith("/hcg") or "hcg" in dataset_dir_hint:
+            dataset_kind = "hcg"
+        elif "tcg" in repo_hint:
+            dataset_kind = "tcg"
+        else:
+            dataset_kind = "hcg"
+    is_tcg = dataset_kind == "tcg"
 
     if args.dataset_dir:
         dataset_dir = Path(args.dataset_dir)
