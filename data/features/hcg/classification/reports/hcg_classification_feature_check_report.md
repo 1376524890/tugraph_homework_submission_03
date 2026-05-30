@@ -29,7 +29,7 @@ Overall status: **PASS**
 | `train_ratio` | `0.699906` |
 | `valid_ratio` | `0.100031` |
 | `test_ratio` | `0.200063` |
-| `check_elapsed_seconds` | `44.250659` |
+| `check_elapsed_seconds` | `43.700751` |
 
 ## Split Counts
 

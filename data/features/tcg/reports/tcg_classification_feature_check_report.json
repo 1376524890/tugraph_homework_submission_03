@@ -1,0 +1,74 @@
+{
+  "overall_status": "PASS",
+  "datasets": {
+    "D": {
+      "path": "/home/u2023312303/裴的实验/tugraph_homework_submission_03/data/features/tcg/classification/datasets/D_tcg_flow_node2vec_d64_light_crpr.parquet",
+      "rows": 3577296,
+      "columns": 70,
+      "feature_columns": 65,
+      "tcg_emb_columns": 64,
+      "has_tcg_emb_missing_flag": true,
+      "checks": {
+        "exists": true,
+        "rows_equal_A": true,
+        "record_id_unique": true,
+        "record_id_order_matches_A": true,
+        "target_matches_A": true,
+        "split_matches_A": true,
+        "tcg_emb_col_count_64": true,
+        "has_tcg_emb_missing_flag": true,
+        "no_nan": true,
+        "no_inf": true
+      },
+      "status": "PASS"
+    },
+    "E": {
+      "path": "/home/u2023312303/裴的实验/tugraph_homework_submission_03/data/features/tcg/classification/datasets/E_raw_plus_tcg_d64_light_crpr.parquet",
+      "rows": 3577296,
+      "columns": 161,
+      "feature_columns": 156,
+      "tcg_emb_columns": 64,
+      "has_tcg_emb_missing_flag": true,
+      "checks": {
+        "exists": true,
+        "rows_equal_A": true,
+        "record_id_unique": true,
+        "record_id_order_matches_A": true,
+        "target_matches_A": true,
+        "split_matches_A": true,
+        "tcg_emb_col_count_64": true,
+        "has_tcg_emb_missing_flag": true,
+        "contains_all_A_feature_columns": true,
+        "no_nan": true,
+        "no_inf": true
+      },
+      "status": "PASS"
+    },
+    "F": {
+      "path": "/home/u2023312303/裴的实验/tugraph_homework_submission_03/data/features/tcg/classification/datasets/F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet",
+      "rows": 3577296,
+      "columns": 419,
+      "feature_columns": 414,
+      "tcg_emb_columns": 64,
+      "has_tcg_emb_missing_flag": true,
+      "checks": {
+        "exists": true,
+        "rows_equal_A": true,
+        "record_id_unique": true,
+        "record_id_order_matches_A": true,
+        "target_matches_A": true,
+        "split_matches_A": true,
+        "tcg_emb_col_count_64": true,
+        "has_tcg_emb_missing_flag": true,
+        "rows_equal_C": true,
+        "record_id_order_matches_C": true,
+        "target_matches_C": true,
+        "split_matches_C": true,
+        "contains_all_C_feature_columns": true,
+        "no_nan": true,
+        "no_inf": true
+      },
+      "status": "PASS"
+    }
+  }
+}
