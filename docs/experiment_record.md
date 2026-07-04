@@ -3665,13 +3665,19 @@ src_endpoint + dst_endpoint 各 78 维 K-fold target encoding（156 维），融
 
 | 组 | decision_tree | logistic_sgd | knn | vs node2vec knn | vs HCG knn |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| D_te（156 维 TE） | 0.3431 | **0.6688** | **0.6342** | 0.044 → **14.4×** | **> B 0.447** |
-| E_te（raw+TE） | 0.3696 | 0.0345† | **0.5899** | > node2vec E 0.207 | — |
-| F_te（raw+hcg+TE） | 0.3825 | 0.0924† | **0.6001** | > node2vec F 0.422 | **> HCG C 0.451** |
+| 组 | decision_tree | logistic_sgd | random_forest | naive_bayes | knn | vs node2vec knn | vs HCG knn |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| D_te（156维 TE） | 0.343 | **0.669** | 0.520 | 0.284 | **0.634** | 0.044 → 14.4× | > B 0.447 |
+| E_te（raw+TE） | 0.370 | 0.034† | 0.484 | 0.251 | 0.590 | > E 0.207 | — |
+| F_te（raw+hcg+TE） | 0.383 | 0.092† | 0.476 | 0.247 | 0.600 | > F 0.422 | > C 0.451 |
 
-**修复（StandardScaler）**：对融合特征做 `StandardScaler`（fit on train），消除 raw（bytes~1e6）淹没 TE（0~1）的尺度问题。标准化后 E/F knn 从 0.154 飙到 **0.59/0.60**，全部超过 HCG C(0.451)；D_te logistic 也从 0.334 升到 0.669（TE 中心化利于线性模型）。
+**6 分类器（5 范式：树/线性/集成/概率/距离 + 基线）一致证明 target encoding 有效**：
+- RandomForest（集成）三组稳定 **0.48–0.52**，是最稳健的分类器（不受尺度/SGD 影响）
+- knn/logistic 在 D_te 最强（**0.63/0.67**）
+- 所有真实分类器（除 nb）在 D_te 都 >> node2vec D（0.044）
+- 标准化（StandardScaler）修复 E/F 尺度问题：knn 从 0.154 飙到 0.59/0.60
 
-† E/F 的 logistic 仍偏低是 SGD(`max_iter=20`) 未收敛问题，与尺度无关——`knn`（标准化后 0.59/0.60）证明 TE 在融合中完全有效。
+† logistic E/F 偏低是 SGD(`max_iter=20`) 未收敛，与尺度/TE 无关——同特征上 knn 达 0.59/0.60、rf 达 0.48。naive_bayes 偏弱（0.25–0.28）是其特征独立假设不成立（端点标签分布特征间相关），本身是有信息量的发现。
 
 ### 核心结论
 

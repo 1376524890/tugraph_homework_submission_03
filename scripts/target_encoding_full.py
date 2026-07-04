@@ -15,8 +15,10 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 from sklearn.dummy import DummyClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import accuracy_score, f1_score
+from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.tree import DecisionTreeClassifier
@@ -73,9 +75,9 @@ def kfold_te(a: pd.DataFrame, col: str, y: np.ndarray, splits: np.ndarray,
 
 
 def train_eval(name: str, Xtr, ytr, Xtest, ytest, knn_train_sample: int = 60000) -> None:
-    ref = {"D": {"dummy": 0.0095, "dt": 0.0216, "logistic": 0.0154, "knn": 0.0440},
-           "E": {"dummy": 0.0095, "dt": 0.1651, "logistic": 0.1113, "knn": 0.2069},
-           "F": {"dummy": 0.0095, "dt": 0.2245, "logistic": 0.1715, "knn": 0.4220}}
+    ref = {"D": {"dummy": 0.0095, "dt": 0.0216, "logistic": 0.0154, "knn": 0.0440, "rf": "-", "nb": "-"},
+           "E": {"dummy": 0.0095, "dt": 0.1651, "logistic": 0.1113, "knn": 0.2069, "rf": "-", "nb": "-"},
+           "F": {"dummy": 0.0095, "dt": 0.2245, "logistic": 0.1715, "knn": 0.4220, "rf": "-", "nb": "-"}}
     hcg = {"A": 0.261, "B": 0.447, "C": 0.451}  # knn 参考
     print(f"\n--- {name} (shape train={Xtr.shape}) ---")
     scaler = StandardScaler(with_mean=False).fit(Xtr)  # fit on train，修复 raw(bytes~1e6) 淹没 TE(0~1) 的尺度问题
@@ -84,6 +86,8 @@ def train_eval(name: str, Xtr, ytr, Xtest, ytest, knn_train_sample: int = 60000)
         ("dummy", DummyClassifier(strategy="most_frequent")),
         ("dt", DecisionTreeClassifier(max_depth=20, random_state=SEED)),
         ("logistic", SGDClassifier(loss="log_loss", max_iter=20, random_state=SEED, n_jobs=-1)),
+        ("rf", RandomForestClassifier(n_estimators=50, max_depth=20, n_jobs=-1, random_state=SEED)),
+        ("nb", GaussianNB()),
     ]
     for mname, clf in models:
         clf.fit(Xtr_s, ytr)
@@ -91,7 +95,9 @@ def train_eval(name: str, Xtr, ytr, Xtest, ytest, knn_train_sample: int = 60000)
         mf1 = f1_score(ytest, pred, average="macro", zero_division=0)
         acc = accuracy_score(ytest, pred)
         grp = name[0]
-        print(f"  {mname:9s} macro_f1={mf1:.4f} acc={acc:.4f}   node2vec {grp}={ref[grp][mname]:.4f}")
+        r = ref[grp].get(mname, "-")
+        rstr = f"{r:.4f}" if isinstance(r, float) else r
+        print(f"  {mname:9s} macro_f1={mf1:.4f} acc={acc:.4f}   node2vec {grp}={rstr}")
     # knn（采样 train 加速 + batch predict）
     if len(Xtr_s) > knn_train_sample:
         rng = np.random.RandomState(SEED)
