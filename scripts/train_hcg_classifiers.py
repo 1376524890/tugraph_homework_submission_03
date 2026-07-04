@@ -77,6 +77,10 @@ DEFAULT_MODEL_ALIASES = {
     "decision_tree": ["decision_tree"],
     "lightgbm": ["lightgbm"],
     "knn_sample": ["knn_sample"],
+    "rf": ["random_forest"],
+    "random_forest": ["random_forest"],
+    "nb": ["naive_bayes"],
+    "naive_bayes": ["naive_bayes"],
 }
 STAGES = [
     "init",
@@ -562,6 +566,34 @@ def train_decision_tree(model_name: str, xy: dict[str, Any], seed: int) -> tuple
     from sklearn.tree import DecisionTreeClassifier
 
     clf = DecisionTreeClassifier(max_depth=40, min_samples_leaf=100, random_state=seed, class_weight=None)
+    started = time.perf_counter()
+    clf.fit(xy["X_train"], xy["y_train"])
+    train_seconds = elapsed(started)
+    pred_started = time.perf_counter()
+    y_valid_pred = clf.predict(xy["X_valid"])
+    y_test_pred = clf.predict(xy["X_test"])
+    inference_seconds = elapsed(pred_started)
+    return clf, y_valid_pred, y_test_pred, train_seconds, inference_seconds, None, {"sampled": False}
+
+
+def train_random_forest(model_name: str, xy: dict[str, Any], seed: int) -> tuple[Any, np.ndarray, np.ndarray, float, float, pd.DataFrame | None, dict[str, Any]]:
+    from sklearn.ensemble import RandomForestClassifier
+
+    clf = RandomForestClassifier(n_estimators=100, max_depth=40, min_samples_leaf=100, n_jobs=-1, random_state=seed)
+    started = time.perf_counter()
+    clf.fit(xy["X_train"], xy["y_train"])
+    train_seconds = elapsed(started)
+    pred_started = time.perf_counter()
+    y_valid_pred = clf.predict(xy["X_valid"])
+    y_test_pred = clf.predict(xy["X_test"])
+    inference_seconds = elapsed(pred_started)
+    return clf, y_valid_pred, y_test_pred, train_seconds, inference_seconds, None, {"sampled": False}
+
+
+def train_naive_bayes(model_name: str, xy: dict[str, Any], seed: int) -> tuple[Any, np.ndarray, np.ndarray, float, float, pd.DataFrame | None, dict[str, Any]]:
+    from sklearn.naive_bayes import GaussianNB
+
+    clf = GaussianNB()
     started = time.perf_counter()
     clf.fit(xy["X_train"], xy["y_train"])
     train_seconds = elapsed(started)
@@ -1166,6 +1198,10 @@ def run_task(
             model, scaler, y_valid_pred, y_test_pred, train_seconds, inference_seconds, eval_history, extra = train_knn_sample(
                 xy, args, event_logger, tid, feature_group, status_board
             )
+        elif model_name == "random_forest":
+            model, y_valid_pred, y_test_pred, train_seconds, inference_seconds, eval_history, extra = train_random_forest(model_name, xy, args.seed)
+        elif model_name == "naive_bayes":
+            model, y_valid_pred, y_test_pred, train_seconds, inference_seconds, eval_history, extra = train_naive_bayes(model_name, xy, args.seed)
         else:
             raise ValueError(f"Unsupported model: {model_name}")
         if writer is not None:

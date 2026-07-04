@@ -58,6 +58,8 @@ declare -A MODEL_DESC=(
     ["decision_tree"]="Decision Tree"
     ["lightgbm"]="LightGBM (GPU/CPU)"
     ["knn_sample"]="K-Nearest Neighbors"
+    ["rf"]="Random Forest (ensemble)"
+    ["nb"]="Naive Bayes (probabilistic)"
 )
 
 # ───────────────────── 工具函数 ───────────────────────────
@@ -332,6 +334,23 @@ api.repo_exists('${tcg_repo_id}', repo_type='dataset')
         --dataset-kind tcg \
         --dataset-dir "$TCG_DATASET_DIR"
 
+    # 清理旧版 d64_light_crpr（CR+PR，node2vec 坍塌、效果差），确保使用新版 d128_light_shrcr（SHR+CR）
+    for old_f in "D_tcg_flow_node2vec_d64_light_crpr.parquet" \
+                 "E_raw_plus_tcg_d64_light_crpr.parquet" \
+                 "F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet"; do
+        if [ -f "$TCG_DATASET_DIR/$old_f" ]; then
+            warn "清理旧版 TCG 数据（d64_light_crpr, CR+PR）: $old_f"
+            rm -f "$TCG_DATASET_DIR/$old_f"
+        fi
+    done
+    # 校验新版 d128_light_shrcr 到位
+    if [ -f "$TCG_DATASET_DIR/D_tcg_flow_node2vec_d128_light_shrcr.parquet" ]; then
+        ok "新版 TCG 数据就绪（d128_light_shrcr, SHR+CR）"
+    else
+        err "新版 TCG 数据缺失 D_tcg_flow_node2vec_d128_light_shrcr.parquet"
+        return 1
+    fi
+
     local rc=$?
     if [ $rc -eq 0 ]; then
         ok "数据集下载完成"
@@ -440,7 +459,7 @@ interactive_config() {
     # 2. 选择模型
     echo ""
     local model_options=()
-    for m in dummy logistic_sgd decision_tree lightgbm knn_sample; do
+    for m in dummy logistic_sgd decision_tree rf nb lightgbm knn_sample; do
         # Skip lightgbm if not installed
         if [ "$m" = "lightgbm" ] && ! python3 -c "import lightgbm" 2>/dev/null; then
             continue
@@ -840,6 +859,16 @@ main() {
 
     # Step 5: Run
     run_training
+
+    # Step 6: target encoding 验证（对比 node2vec 坍塌，证明 SHR/CR 端点信号本身有效）
+    if ask_yesno "是否运行 target encoding 验证（对比 node2vec，证明 SHR/CR 信号本身有效）?" "y"; then
+        header "target encoding 验证"
+        if [ ! -f "data/features/hcg/classification/datasets_c_safe/C_raw_plus_hcg_flow_emb.parquet" ]; then
+            info "预采样 C 组（subsample_hcg_c_safe）..."
+            PYTHONPATH=src python3 scripts/subsample_hcg_c_safe.py || warn "C 组预采样失败"
+        fi
+        PYTHONPATH=src python3 scripts/compare_all_features.py || warn "target encoding 验证失败，详见输出"
+    fi
 }
 
 main "$@"
