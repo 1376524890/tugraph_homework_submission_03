@@ -3612,7 +3612,21 @@ D/E/F 训练（预采样 13 万行，跳过 lightgbm，`--no-memory-guard`）对
 
 **负面（flow 级 node2vec 本质局限）**：D 组 knn 0.044 仍极低（HCG B 是 0.447 的 1/10）；E(0.231) < A(0.261)、F(0.422) < C(0.451)——TCG 嵌入对融合组仍是负贡献。
 
-**根本原因**：SHR 边按 (timestamp, record_id) 序配对，walk 在**端点内时间相邻**的 flow 间走（nearest samples 的 record_id 连续证实），学到"端点内时间局部"而非"应用类别语义"。SHR 边只在端点内、不跨端点，无法像 HCG（endpoint 图）那样直接编码端点身份。这是 **flow 级 node2vec 的本质局限**，非参数问题——`SHR_WINDOW=None` 全覆盖预期 D knn 仅 ~0.06-0.08，无法突破。
+**根本原因（数据驱动，修正早期"时间局部性"推断）**：用 `analyze_tcg_embedding.py` + `analyze_embedding_collapse.py` 对 218 万 embedding 做定量诊断，发现是**软坍塌（soft collapse）+ 无判别个体噪声**，而非单纯时间局部性：
+
+| 指标 | 值 | 含义 |
+| --- | ---: | --- |
+| 随机 flow 对 cosine 中位 | **0.938** | 理想≈0；接近 1 = 强公共分量 |
+| 最近邻同 src_endpoint 率 | 0.326 | 几乎不编码端点身份 |
+| 最近邻同 target 率 | 0.374 | 仅略高于基线 0.268，个体差异不编码应用 |
+| PCA top-1 方差占比 | 0.387 | 非单维坍塌（个体差异存在） |
+| PCA top-10 累计 | 0.506 | 个体差异分散多维度 |
+
+嵌入结构 = **大公共分量（mean）+ 多维个体噪声**：cosine 被公共分量主导（0.94），PCA 中心化后看到分散的个体噪声，但该噪声不编码应用（同 target ≈ 基线）。knn 无论用 cosine 还是 euclidean 都无法提取判别信号 → D knn 0.044。
+
+**根因**：SHR 图的 walk 在端点内小团（cap K=15，端点 p50 仅 2 flow）里打转，word2vec 学不到端点身份/应用类别的判别表示。对比 HCG：COMMUNICATES 边**跨端点**，walk 访问多样端点 → 嵌入编码端点身份 → B knn 0.447。TCG 的 SHR 边**不跨端点**，walk 单一 → 嵌入丢失判别力。这是 **flow 级 node2vec 在端点内小团图上的本质局限**，非参数/覆盖问题——`SHR_WINDOW=None` 全覆盖也无法突破。
+
+> 早期基于 nearest samples 的"时间局部性"判断不准确：record_id 连续是坍塌下任意最近邻的巧合（统计 3000 flow 的最近邻 record_id 差中位 301,050，并非连续）。
 
 **学术价值**：验证了关系同质性分析正确（SHR 是最强信号关系），但揭示 flow 级 node2vec 对该任务的本质局限——HCG endpoint 级嵌入（B knn 0.447）已更优，TCG flow 级嵌入难以超越。后续若要突破需换异构图方法（如 metapath2vec 捕获跨端点类别结构）。
 
