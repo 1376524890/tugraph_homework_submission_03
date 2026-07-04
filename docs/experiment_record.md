@@ -3641,4 +3641,47 @@ D/E/F 训练（预采样 13 万行，跳过 lightgbm，`--no-memory-guard`）对
 | 新增脚本 | `build_tcg_flow_parquet_from_features.py`, `build_tcg_shrcr_capped.py` |
 - [ ] build D/E/F（`d128_light_shrcr`）
 - [ ] 预采样 + 训练评估（D 组 knn Macro-F1 对比 0.034）
-- [ ] 上传 ModelScope + 结果回填本节
+- [x] 上传 ModelScope + 结果回填（D/E/F d128_light_shrcr 已上传到 MarkTom/IP-Network-Flow-Graph）
+
+## 2026-07-04 target encoding 验证：保持 TCG 建图思路，证明 node2vec 坍塌
+
+### 背景
+
+light_shrcr 重建后 D knn 仍 0.044（坍塌）。为区分"SHR 信号本身是否有效"与"node2vec 方法是否问题"，对 src_endpoint（SHR key）做 target encoding（监督标签统计）替代 node2vec 嵌入，用**相同预采样 flow + 分类器**对照。target encoding 仍属 TCG 建模范畴：直接利用 SHR/CR 关系的端点 key。
+
+### 单端点验证（`target_encoding_baseline.py`）
+
+src_endpoint 的 K-fold target encoding（78 维标签概率），与 D_node2vec 相同 130k flow + 4 分类器：
+
+| 分类器 | D_te | D_node2vec | 倍数 |
+| --- | ---: | ---: | ---: |
+| decision_tree | 0.2243 | 0.0216 | 10.4× |
+| logistic_sgd | 0.1163 | 0.0154 | 7.6× |
+| knn_sample | 0.3489 | 0.0440 | 7.9× |
+
+### 双端点验证（`target_encoding_full.py`）
+
+src_endpoint + dst_endpoint 各 78 维 K-fold target encoding（156 维），融合 raw/hcg 得 D_te/E_te/F_te：
+
+| 组 | decision_tree | logistic_sgd | knn | vs node2vec knn | vs HCG knn |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| D_te（156 维 TE） | 0.3442 | 0.3343 | **0.6443** | 0.044 → **14.6×** | **> B 0.447** |
+| E_te（raw+TE） | 0.3620 | 0.0149* | 0.1543* | — | — |
+| F_te（raw+hcg+TE） | 0.3757 | 0.0149* | 0.1543* | — | — |
+
+\* E/F 的 logistic/knn 异常低：raw 特征尺度（bytes~1e6）远大于 TE 概率（0~1），SGD 未收敛 + knn 距离被 raw 主导——是**融合的标准化问题，不是 TE 无效**（dt 尺度无关，所以 E/F 的 dt 正常提升）。
+
+### 核心结论
+
+1. **node2vec 方法问题铁证**：D_te knn 0.6443 是 node2vec D（0.044）的 **14.6 倍**，且超过 HCG B（0.447）。SHR/CR 端点信号本身极强，问题确凿在 node2vec 嵌入（坍塌）。
+
+2. **保持 TCG 建图且保证效果**：target encoding 直接利用 SHR/CR 关系的端点 key（同端点=同类），保持 TCG 建模思路，用监督标签统计替代坍塌的无监督嵌入。D_te knn 0.6443 是迄今最强端点信号利用。
+
+3. **E/F 融合需标准化**：raw/TE 尺度不一致导致 logistic/knn 失败（dt 正常），融合时应 `StandardScaler` raw。
+
+### 新增脚本
+
+| 脚本 | 用途 |
+| --- | --- |
+| `target_encoding_baseline.py` | 单端点（src）K-fold target encoding 对照 node2vec |
+| `target_encoding_full.py` | 双端点（src+dst）target encoding + D/E/F 融合对照 |
