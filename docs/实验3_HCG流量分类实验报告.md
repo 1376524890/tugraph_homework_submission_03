@@ -1,4 +1,4 @@
-# 作业 3 基于 HCG 主机通信图的流量分类
+# 实验 3 基于 HCG 主机通信图的流量分类
 
 ## 一、数据集介绍、下载与展示
 
@@ -27,9 +27,7 @@ path = kagglehub.dataset_download("jsrochas/ip-network-traffic-flows-labeled-wit
 
 A 组特征表的结构如下：前五列为元信息 record_id、target、split、src_endpoint、dst_endpoint，其余 91 列为 raw_ 前缀的统计特征。
 
-> 待补截图 1：原始 CSV 表头与前几行样本，展示 Flow.ID、Source.IP、Source.Port、Destination.IP、Protocol、Timestamp、Label 等字段。
 >
-> 待补截图 2：A 组 parquet 的 schema 与样本行，展示 record_id、target、split、src_endpoint、dst_endpoint 及 raw_ 前缀的统计特征列。
 
 ## 二、HCG 图建模方法
 
@@ -98,9 +96,7 @@ MATCH (n:Endpoint) RETURN count(n)            -- 935600
 MATCH ()-[r:COMMUNICATES]->() RETURN count(r) -- 1716084
 ```
 
-> 待补截图 3：TuGraph WebUI 中 HCG 图的 schema 视图，展示 Endpoint 顶点、COMMUNICATES 边及各自属性字段。
 >
-> 待补截图 4：导入命令的执行输出，展示顶点数 935600、边数 1716084、导入耗时。
 
 ## 三、边嵌入与特征融合
 
@@ -166,9 +162,7 @@ PYTHONPATH=src python scripts/train_hcg_word2vec_embeddings.py --vector-size 64
 PYTHONPATH=src python scripts/build_hcg_classification_features.py
 ```
 
-> 待补截图 5：node2vec walk 文件样本，展示端点 id 的游走序列。
 >
-> 待补截图 6：B 组 parquet 样本，展示 hcg_src_emb_000 至 063、hcg_dst_emb_000 至 063、hcg_absdiff_emb_*、hcg_prod_emb_* 等嵌入列。
 
 ## 四、分类器与评价指标
 

@@ -1,16 +1,15 @@
-# 作业 4 基于 TCG 流因果图的流量分类
+# 实验 4 基于 TCG 流因果图的流量分类
 
 ## 一、数据集介绍、下载与展示
 
 ### 1.1 数据集概况
 
-实验数据与作业 3 相同，为 Unicauca IP 网络流量数据集，共约 357 万条网络流、78 种应用标签、91 个统计特征。本作业从流因果的视角重新建模同一份数据，重点刻画流与流之间的时序与逻辑关联，看这种关联能否为应用分类提供额外信号。
+实验数据与实验 3 相同，为 Unicauca IP 网络流量数据集，共约 357 万条网络流、78 种应用标签、91 个统计特征。本实验从流因果的视角重新建模同一份数据，重点刻画流与流之间的时序与逻辑关联，看这种关联能否为应用分类提供额外信号。
 
 ### 1.2 TCG 视角下的字段
 
 TCG 建模除了用到原始统计特征，还需要每条流的主键、端点、协议与时间戳。具体包括 record_id 作为流主键，src_endpoint、dst_endpoint 表示通信两端，raw_protocol 表示协议，raw_timestamp_epoch 表示流开始时间。这些字段从 A 组特征表直接提取，供因果关系判定使用。
 
-> 待补截图 1：A 组 parquet 样本，重点展示 record_id、src_endpoint、dst_endpoint、raw_protocol、raw_timestamp_epoch 等用于 TCG 建模的字段。
 
 ## 二、TCG 图建模方法
 
@@ -84,9 +83,7 @@ PYTHONPATH=src python scripts/build_tcg_shrcr_capped.py
 PYTHONPATH=src python scripts/import_tugraph_native.py --graph-type tcg --graph tcg_light_shrcr
 ```
 
-> 待补截图 2：TCG 图 schema，展示 Flow 顶点、CAUSES 边及 relation_type、relation_priority、delta_seconds 等属性。
 >
-> 待补截图 3：导入命令输出，展示顶点数 3577296、边数 11572925 及 SHR、CR 分布。
 
 ## 三、点嵌入与特征融合
 
@@ -117,7 +114,6 @@ PYTHONPATH=src python scripts/train_tcg_word2vec_embeddings.py --vector-size 128
 PYTHONPATH=src python scripts/target_encoding_full.py
 ```
 
-> 待补截图 4：node2vec walk 文件样本。
 >
 ![嵌入 PCA 对比：node2vec 坍塌 vs. target encoding](figures/h4_pca_comparison.png)
 >
@@ -127,7 +123,7 @@ PYTHONPATH=src python scripts/target_encoding_full.py
 
 ### 4.1 分类器选择
 
-分类器配置与评价指标与作业 3 一致，并补充了 random_forest 与 naive_bayes，连同 lightgbm 共七种分类器、五种范式，覆盖基线、树、线性、集成、概率、距离，确保对比充分。
+分类器配置与评价指标与实验 3 一致，并补充了 random_forest 与 naive_bayes，连同 lightgbm 共七种分类器、五种范式，覆盖基线、树、线性、集成、概率、距离，确保对比充分。
 
 ### 4.2 评价指标
 
@@ -135,7 +131,7 @@ PYTHONPATH=src python scripts/target_encoding_full.py
 
 ### 4.3 lightgbm 在预采样规模下的局限
 
-lightgbm 在本作业表现偏弱，A 至 F 组的 Macro-F1 仅 0.022 到 0.089。原因是 13 万预采样下少数类样本严重不足，78 类里多数长尾类只剩几十条，lightgbm 这类提升树难以学出稳定判别。曾尝试加 class_weight 平衡少数类，反而因权重过大进一步拖垮整体，去掉后依然偏低，说明瓶颈在样本量而非权重配置。因此 lightgbm 结果参考价值有限，主要对比以 decision_tree、knn、random_forest 等稳定分类器为准。
+lightgbm 在本实验表现偏弱，A 至 F 组的 Macro-F1 仅 0.022 到 0.089。原因是 13 万预采样下少数类样本严重不足，78 类里多数长尾类只剩几十条，lightgbm 这类提升树难以学出稳定判别。曾尝试加 class_weight 平衡少数类，反而因权重过大进一步拖垮整体，去掉后依然偏低，说明瓶颈在样本量而非权重配置。因此 lightgbm 结果参考价值有限，主要对比以 decision_tree、knn、random_forest 等稳定分类器为准。
 
 下表是 D、E、F 三组（target encoding 版）在七种分类器上的 Macro-F1，最后一列对照 node2vec 版的 knn：
 
