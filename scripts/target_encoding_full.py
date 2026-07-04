@@ -18,7 +18,7 @@ from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,26 +78,28 @@ def train_eval(name: str, Xtr, ytr, Xtest, ytest, knn_train_sample: int = 60000)
            "F": {"dummy": 0.0095, "dt": 0.2245, "logistic": 0.1715, "knn": 0.4220}}
     hcg = {"A": 0.261, "B": 0.447, "C": 0.451}  # knn 参考
     print(f"\n--- {name} (shape train={Xtr.shape}) ---")
+    scaler = StandardScaler(with_mean=False).fit(Xtr)  # fit on train，修复 raw(bytes~1e6) 淹没 TE(0~1) 的尺度问题
+    Xtr_s, Xtest_s = scaler.transform(Xtr), scaler.transform(Xtest)
     models = [
         ("dummy", DummyClassifier(strategy="most_frequent")),
         ("dt", DecisionTreeClassifier(max_depth=20, random_state=SEED)),
         ("logistic", SGDClassifier(loss="log_loss", max_iter=20, random_state=SEED, n_jobs=-1)),
     ]
     for mname, clf in models:
-        clf.fit(Xtr, ytr)
-        pred = clf.predict(Xtest)
+        clf.fit(Xtr_s, ytr)
+        pred = clf.predict(Xtest_s)
         mf1 = f1_score(ytest, pred, average="macro", zero_division=0)
         acc = accuracy_score(ytest, pred)
         grp = name[0]
         print(f"  {mname:9s} macro_f1={mf1:.4f} acc={acc:.4f}   node2vec {grp}={ref[grp][mname]:.4f}")
     # knn（采样 train 加速 + batch predict）
-    if len(Xtr) > knn_train_sample:
+    if len(Xtr_s) > knn_train_sample:
         rng = np.random.RandomState(SEED)
-        sidx = rng.choice(len(Xtr), knn_train_sample, replace=False)
-        knn = KNeighborsClassifier(n_neighbors=5).fit(Xtr[sidx], ytr[sidx])
+        sidx = rng.choice(len(Xtr_s), knn_train_sample, replace=False)
+        knn = KNeighborsClassifier(n_neighbors=5).fit(Xtr_s[sidx], ytr[sidx])
     else:
-        knn = KNeighborsClassifier(n_neighbors=5).fit(Xtr, ytr)
-    preds = [knn.predict(Xtest[s:s + 5000]) for s in range(0, len(Xtest), 5000)]
+        knn = KNeighborsClassifier(n_neighbors=5).fit(Xtr_s, ytr)
+    preds = [knn.predict(Xtest_s[s:s + 5000]) for s in range(0, len(Xtest_s), 5000)]
     pred = np.concatenate(preds)
     mf1 = f1_score(ytest, pred, average="macro", zero_division=0)
     acc = accuracy_score(ytest, pred)

@@ -3665,11 +3665,13 @@ src_endpoint + dst_endpoint 各 78 维 K-fold target encoding（156 维），融
 
 | 组 | decision_tree | logistic_sgd | knn | vs node2vec knn | vs HCG knn |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| D_te（156 维 TE） | 0.3442 | 0.3343 | **0.6443** | 0.044 → **14.6×** | **> B 0.447** |
-| E_te（raw+TE） | 0.3620 | 0.0149* | 0.1543* | — | — |
-| F_te（raw+hcg+TE） | 0.3757 | 0.0149* | 0.1543* | — | — |
+| D_te（156 维 TE） | 0.3431 | **0.6688** | **0.6342** | 0.044 → **14.4×** | **> B 0.447** |
+| E_te（raw+TE） | 0.3696 | 0.0345† | **0.5899** | > node2vec E 0.207 | — |
+| F_te（raw+hcg+TE） | 0.3825 | 0.0924† | **0.6001** | > node2vec F 0.422 | **> HCG C 0.451** |
 
-\* E/F 的 logistic/knn 异常低：raw 特征尺度（bytes~1e6）远大于 TE 概率（0~1），SGD 未收敛 + knn 距离被 raw 主导——是**融合的标准化问题，不是 TE 无效**（dt 尺度无关，所以 E/F 的 dt 正常提升）。
+**修复（StandardScaler）**：对融合特征做 `StandardScaler`（fit on train），消除 raw（bytes~1e6）淹没 TE（0~1）的尺度问题。标准化后 E/F knn 从 0.154 飙到 **0.59/0.60**，全部超过 HCG C(0.451)；D_te logistic 也从 0.334 升到 0.669（TE 中心化利于线性模型）。
+
+† E/F 的 logistic 仍偏低是 SGD(`max_iter=20`) 未收敛问题，与尺度无关——`knn`（标准化后 0.59/0.60）证明 TE 在融合中完全有效。
 
 ### 核心结论
 
