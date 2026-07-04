@@ -12,6 +12,7 @@ import numpy as np, pandas as pd, pyarrow.parquet as pq
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import SGDClassifier
+from matplotlib.colors import LinearSegmentedColormap
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
@@ -81,7 +82,8 @@ top20 = np.argsort(np.bincount(y_test))[-20:]  # top-20 类
 mask = np.isin(y_test, top20) & np.isin(pred, top20)
 cm = confusion_matrix(y_test[mask], pred[mask], labels=top20)
 fig, ax = plt.subplots(figsize=(10,9))
-ConfusionMatrixDisplay(cm, display_labels=[le.classes_[i] for i in top20]).plot(ax=ax, xticks_rotation="vertical", values_format="d", cmap="YlOrRd")
+cmap_morandi = LinearSegmentedColormap.from_list("morandi_rb", ["#7B9EB3","#F5EDE8","#C4826E"])
+ConfusionMatrixDisplay(cm, display_labels=[le.classes_[i] for i in top20]).plot(ax=ax, xticks_rotation="vertical", values_format="d", cmap=cmap_morandi)
 ax.set_title("HCG C Group RandomForest Confusion (top-20 classes)")
 fig.tight_layout(); fig.savefig(OUT/"h3_c_rf_confusion.png", dpi=150); plt.close()
 print("  -> docs/figures/h3_c_rf_confusion.png", flush=True)
@@ -170,9 +172,50 @@ top20 = np.argsort(np.bincount(y_test))[-20:]
 mask = np.isin(y_test, top20) & np.isin(pred2, top20)
 cm2 = confusion_matrix(y_test[mask], pred2[mask], labels=top20)
 fig, ax = plt.subplots(figsize=(10,9))
-ConfusionMatrixDisplay(cm2, display_labels=[le.classes_[i] for i in top20]).plot(ax=ax, xticks_rotation="vertical", values_format="d", cmap="YlOrRd")
+ConfusionMatrixDisplay(cm2, display_labels=[le.classes_[i] for i in top20]).plot(ax=ax, xticks_rotation="vertical", values_format="d", cmap=cmap_morandi)
 ax.set_title("D_te Group Logistic Confusion Matrix (top-20 classes)")
 fig.tight_layout(); fig.savefig(OUT/"h4_dte_logistic_confusion.png", dpi=150); plt.close()
 print("  -> docs/figures/h4_dte_logistic_confusion.png", flush=True)
+
+# ========== 训练时间对比 ==========
+print("训练时间对比...", flush=True)
+time_data = {
+    ("A","dt"):6.5,("A","logistic"):26,("A","rf"):8,("B","dt"):61,("B","logistic"):35,("B","rf"):95,
+    ("C","dt"):60,("C","logistic"):57,("C","rf"):100,("D_te","dt"):22,("D_te","logistic"):37,("D_te","rf"):35,
+    ("E_te","dt"):26,("E_te","logistic"):49,("E_te","rf"):42,("F_te","dt"):80,("F_te","logistic"):79,("F_te","rf"):95,
+}
+models_t=["dt","logistic","rf"]; groups_t=["A","B","C","D_te","E_te","F_te"]
+fig,ax=plt.subplots(figsize=(10,5)); x=np.arange(len(groups_t)); w=0.25
+for i,m in enumerate(models_t):
+    ax.bar(x+i*w, [time_data[(g,m)] for g in groups_t], w, label=m, zorder=3)
+ax.set_xticks(x+w); ax.set_xticklabels(groups_t); ax.set_ylabel("Train time (s)")
+ax.set_title("Training Time by Feature Group & Classifier (130k)"); ax.legend(); ax.grid(axis="y",alpha=0.3)
+fig.tight_layout(); fig.savefig(OUT/"train_time_comparison.png",dpi=150); plt.close()
+print("  -> docs/figures/train_time_comparison.png", flush=True)
+
+# ========== RF 特征重要性（C 组）==========
+print("RF 特征重要性...", flush=True)
+Xtr_c,_=scaler_fit(C_X); rf3=RandomForestClassifier(n_estimators=50,max_depth=20,n_jobs=-1,random_state=SEED).fit(Xtr_c,y_tr)
+imps=rf3.feature_importances_; top_feat=np.argsort(imps)[-20:][::-1]
+fig,ax=plt.subplots(figsize=(9,6))
+for i,fi in enumerate(top_feat):
+    ax.barh(i,imps[fi],color=cmap_morandi(0.3+0.7*i/len(top_feat)),edgecolor="white",zorder=3)
+ax.set_yticks(range(len(top_feat)))
+ax.set_yticklabels([f"f{fi}" for fi in top_feat],fontsize=7)
+ax.set_xlabel("Importance"); ax.set_title("RF Feature Importance (C group, top-20)"); ax.invert_yaxis(); ax.grid(axis="x",alpha=0.3)
+fig.tight_layout(); fig.savefig(OUT/"h3_rf_importance.png",dpi=150); plt.close()
+print("  -> docs/figures/h3_rf_importance.png", flush=True)
+
+# ========== 各特征组最优 Macro-F1 排名 ==========
+print("各特征组 Macro-F1 排名...", flush=True)
+best={"A":0.333,"B":0.414,"C":0.463,"D_te":0.674,"E_te":0.590,"F_te":0.600}
+fig,ax=plt.subplots(figsize=(8,5))
+colors_best=["#7B9EB3"]*3+["#C4826E"]*3
+bars=ax.barh(list(best.keys()),list(best.values()),color=colors_best,edgecolor="white",zorder=3)
+for bar,val in zip(bars,best.values()):
+    ax.text(val+0.01,bar.get_y()+bar.get_height()/2,f"{val:.3f}",va="center",fontsize=9)
+ax.set_xlabel("Macro-F1"); ax.set_title("Best Macro-F1 per Group (blue=HCG, red=TCG-TE)"); ax.invert_yaxis(); ax.grid(axis="x",alpha=0.3)
+fig.tight_layout(); fig.savefig(OUT/"best_macro_f1_ranking.png",dpi=150); plt.close()
+print("  -> docs/figures/best_macro_f1_ranking.png", flush=True)
 
 print("\n全部图表生成完毕。", flush=True)

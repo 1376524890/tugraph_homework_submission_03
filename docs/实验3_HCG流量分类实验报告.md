@@ -98,6 +98,22 @@ MATCH ()-[r:COMMUNICATES]->() RETURN count(r) -- 1716084
 
 >
 
+### 2.5 HCG 图及 node2vec 参数
+
+| 参数 | 值 |
+| --- | ---: |
+| 端点顶点 | 935,600 |
+| COMMUNICATES 边 | 1,716,084 |
+| node2vec walk_length | 20 |
+| node2vec num_walks | 5 |
+| p / q | 1.0 / 1.0 |
+| 边权 | flow_count (log1p) |
+| word2vec vector_size | 64 |
+| word2vec window / sg / negative | 5 / skip-gram / 5 |
+| 端点嵌入维度 | 64 |
+| B 组特征维度 | 258 (src 64 + dst 64 + absdiff 64 + product 64 + 2 flags) |
+| C 组特征维度 | 349 (raw 91 + HCG 258) |
+
 ## 三、边嵌入与特征融合
 
 ### 3.1 node2vec 原理
@@ -170,6 +186,18 @@ PYTHONPATH=src python scripts/build_hcg_classification_features.py
 
 为比较各特征组效果，选了多种分类器，覆盖不同建模范式。dummy_most_frequent 始终预测多数类，作为随机基线；logistic_sgd 用 SGD 训练逻辑回归，代表线性模型；decision_tree 为决策树，max_depth 限制为 20；knn 为 K 近邻，k 取 5；random_forest 为随机森林，集成多棵决策树降低方差；lightgbm 为梯度提升树，是处理表格数据的强基线；naive_bayes 为高斯朴素贝叶斯，代表概率方法。这样从基线、线性、树、集成、概率到距离共覆盖六种范式，对比充分。
 
+各分类器超参如下表：
+
+| 分类器 | 关键参数 |
+| --- | --- |
+| dummy | strategy=most_frequent |
+| tree | max_depth=20, min_samples_leaf=100 |
+| logistic | SGD(loss=log_loss), max_iter=100, alpha=0.0001 |
+| rf | n_estimators=50, max_depth=20, min_samples_leaf=100 |
+| nb | GaussianNB(无超参) |
+| lgbm | n_estimators=100, num_leaves=31, device=cpu |
+| knn | k=5, weights=distance, batch_predict=5000 |
+
 ### 4.2 评价指标
 
 评价指标用 Macro-F1、Weighted-F1、Accuracy 三项。Macro-F1 对 78 个类别一视同仁地求平均，能反映少数类的识别情况，是类别不平衡场景下的核心指标。Weighted-F1 按各类样本数加权，反映整体表现。Accuracy 是最直观的总体准确率。三项结合，既看少数类又看整体。
@@ -184,11 +212,11 @@ PYTHONPATH=src python scripts/build_hcg_classification_features.py
 
 下表是 A、B、C 三组在七种分类器上的 Macro-F1（13 万预采样，StandardScaler 后）：
 
-| 特征组 | dummy | decision_tree | logistic | random_forest | naive_bayes | lightgbm | knn |
+| Group | dummy | tree | logistic | rf | nb | lgbm | knn |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| A（raw, 91维）| 0.010 | 0.283 | 0.030 | 0.333 | 0.059 | 0.022 | 0.201 |
-| B（HCG emb, 258维）| 0.010 | 0.311 | 0.291 | 0.414 | 0.208 | 0.089 | 0.294 |
-| C（raw+hcg, 349维）| 0.010 | 0.387 | 0.097 | 0.463 | 0.093 | 0.041 | 0.376 |
+| A (raw 91d) | 0.010 | 0.283 | 0.030 | 0.333 | 0.059 | 0.022 | 0.201 |
+| B (HCG 258d) | 0.010 | 0.311 | 0.291 | 0.414 | 0.208 | 0.089 | 0.294 |
+| C (raw+HCG 349d) | 0.010 | 0.387 | 0.097 | 0.463 | 0.093 | 0.041 | 0.376 |
 
 C 组 random_forest 达 0.463，优于 A 组 raw 的 0.333，证明 HCG 图嵌入为原始特征带来约 0.13 的 Macro-F1 增量。random_forest 在三组中均最稳健，logistic 在 B 组嵌入特征上表现也好。lightgbm 在 13 万预采样下因少数类样本不足，Macro-F1 普遍偏低，需要全量数据才能发挥其优势；naive_bayes 受特征独立假设限制，整体偏弱。
 
