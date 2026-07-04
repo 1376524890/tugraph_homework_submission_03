@@ -119,9 +119,9 @@ PYTHONPATH=src python scripts/target_encoding_full.py
 
 > 待补截图 4：node2vec walk 文件样本。
 >
-> 待补截图 5：嵌入 PCA 二维可视化，对比 node2vec 坍塌成一团与 target encoding 按类别分散。
+![嵌入 PCA 对比：node2vec 坍塌 vs. target encoding](figures/h4_pca_comparison.png)
 >
-> 待补截图 6：随机流对 cosine 相似度分布直方图，展示坍塌程度。
+![随机流对 cosine 相似度分布](figures/h4_cosine_dist.png)
 
 ## 四、分类器与评价指标
 
@@ -155,6 +155,6 @@ E_te 与 F_te 融合了原始统计与 TCG 特征后，knn 与随机森林仍有
 
 HCG 与 TCG target encoding 的对比也值得注意。C 组 knn 0.376 对比 F_te knn 0.600，差距达 0.224。F_te 在 C 的基础上仅补充了 156 维 TE 特征，就把 knn 显著提升，说明 TCG 端点信号包含 HCG 端点嵌入没有捕获的信息。HCG 嵌入是端点结构的无监督表示，TE 是端点类别的监督统计，两种信息互补。
 
-> 待补截图 7：node2vec 与 target encoding 的 D 组 Macro-F1 对比柱状图。
+![D 组 node2vec vs target encoding Macro-F1 对比](figures/h4_d_comparison.png)
 >
-> 待补截图 8：target encoding D_te 的混淆矩阵。
+![D_te Logistic 混淆矩阵](figures/h4_dte_logistic_confusion.png)
