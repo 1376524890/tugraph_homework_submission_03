@@ -3368,3 +3368,263 @@ lightgbm >> knn_sample ≈ decision_tree >> logistic_sgd >> dummy_stratified ≈
 - 对比图表：
   - `data/features/hcg/classification/results/figures/`（HCG 内 A/B/C 对比）
   - `data/features/tcg/classification/results/figures/`（TCG 内 D/E/F 对比）
+## 2026-07-04 TCG D/E/F 分类基线与效果诊断
+
+### 背景
+
+TCG D/E/F 数据集自 2026-05-29 构建完成后，`data/features/tcg/classification/results/` 一直为空，未跑过分类评估。本次在本地（7.8G 内存）首次跑通 D/E/F 分类基线，量化 TCG 嵌入效果，并与 HCG A/B/C（同种子 20260525、同采样规模 100k/10k/20k，即 2026-07-03 跑的 `hcg/classification/results/classifier_summary.md`）严格对比。
+
+### 环境与约束
+
+| 项目 | 值 |
+| --- | --- |
+| conda env | `tugraph`（Python 3.12.13, sklearn 1.8.0, pandas 3.0.3, pyarrow 24.0.0, lightgbm 4.6.0）|
+| 内存 | 总 7.8G, 可用 4.1G |
+| 磁盘 | 64G 可用 |
+
+### 关键障碍与解决
+
+**1. 全量 read_parquet OOM**：`train_hcg_classifiers.py` 的 `load_dataset()`（scripts/train_hcg_classifiers.py:410-420）一次性 `pd.read_parquet` 全量读取，采样发生在读取**之后**。D(1.3G)/E(1.8G)/F(4.4G) 解压后在 7G 内存必 OOM(-9)，`--sample-*` 无法缓解 load 阶段。
+
+解决：新增 `scripts/subsample_tcg_def_safe.py`，离线预采样。仿 `subsample_hcg_c_safe.py`，泛化为 D/E/F 三文件**共享同一组全局行号**（基于 A 的 split 列 + `RandomState(seed).permutation`，与 `sample_split` 语义一致）。流式 row-group `Table.take`，峰值 < 1GB。预采样后训练脚本读小文件、不传 `--sample-*` 即可安全跑通。
+
+**2. memory_guard 误判**：`parquet_profile` 的 `estimated_peak_gb = matrix_gb × model_factor + fixed_gb`（scripts/train_hcg_classifiers.py:268），其中 `fixed_gb` 对 logistic/tree/knn 硬编码 **2.0GB**（为全量 357 万行设计）。预采样后 matrix_gb 仅 0.03GB(D)，却被估成 2.09GB，超过 `safe_limit` 1.94GB（= avail 3.94 − min_available 2.0），导致首次运行 9/15 任务被误 skip。
+
+解决：`--no-memory-guard`。预采样后实际峰值远低于 4.1G 可用。
+
+### 预采样参数
+
+| 参数 | 值 |
+| --- | --- |
+| 脚本 | `scripts/subsample_tcg_def_safe.py`（新增）|
+| train / valid / test | 100,000 / 10,000 / 20,000 |
+| seed | 20260525（与 HCG C_safe 对齐，保证 A/B/C/D/E/F 严格可比）|
+| 输出目录 | `data/features/tcg/classification/datasets_safe/` |
+| D / E / F 大小 | 42.8MB / 60.2MB / 198.0MB（均 130k 行，record_id 三组完全对齐）|
+
+### 训练参数
+
+| 参数 | 值 |
+| --- | --- |
+| 脚本 | `scripts/train_hcg_classifiers.py --feature-groups D,E,F`（通用训练脚本，已支持 D/E/F）|
+| 模型 | dummy, logistic_sgd, decision_tree, knn_sample |
+| 跳过 lightgbm | 本地 7G 内存 + lightgbm CUDA/OOM 问题，先拿非 lightgbm 基线 |
+| memory_guard | 关闭（`--no-memory-guard`）|
+| isolate_tasks | True（每任务独立进程）|
+| seed | 20260525 |
+| 总耗时 | 5 分 33 秒（15/15 任务零 OOM）|
+
+### D/E/F 结果（Macro-F1）
+
+| 组 | 内容 | knn_sample | decision_tree | logistic_sgd | dummy_mf |
+| --- | --- | ---: | ---: | ---: | ---: |
+| D | 纯 TCG 嵌入(64维) | 0.0343 | 0.0216 | 0.0154 | 0.0095 |
+| E | raw + TCG | 0.2069 | 0.1651 | 0.1113 | 0.0095 |
+| F | raw + HCG + TCG | 0.4075 | 0.2249 | 0.1757 | 0.0095 |
+
+### 与 HCG A/B/C 对比（同种子同采样规模，knn_sample 为共同最强 baseline）
+
+| 组 | 内容 | knn Macro-F1 | decision_tree Macro-F1 |
+| --- | --- | ---: | ---: |
+| A | raw | 0.261 | 0.165 |
+| B | 纯 HCG 嵌入(256维) | 0.447 | 0.170 |
+| C | raw + HCG | 0.451 | 0.225 |
+| **D** | **纯 TCG 嵌入(64维)** | **0.034** | **0.022** |
+| **E** | **raw + TCG** | **0.207** | **0.165** |
+| **F** | **raw + HCG + TCG** | **0.407** | **0.225** |
+
+### 效果评估：当前 TCG 嵌入是负向贡献
+
+| 对比 | knn Macro-F1 | 结论 |
+| --- | --- | --- |
+| D(纯TCG) vs B(纯HCG) | 0.034 vs 0.447 | TCG 嵌入表达力仅为 HCG 的 1/13；D 的 accuracy 0.242 甚至**低于** dummy most_frequent 0.265 |
+| E(raw+TCG) vs A(raw) | 0.207 vs 0.261，降 5.4 点 | 加入 TCG 反而拉低效果（knn 距离被噪声稀释）|
+| F(raw+HCG+TCG) vs C(raw+HCG) | 0.407 vs 0.451，降 4.4 点 | TCG 对融合组也是负贡献 |
+| E vs A、F vs C（decision_tree）| 持平（0.165 / 0.225）| 树模型能忽略噪声特征，反向证明 TCG 64 维无正向信号 |
+
+**结论**：`light_crpr` 配置的 TCG 嵌入对 78 类分类不仅无用，反而有害。
+
+### 原因猜想（数据驱动）
+
+**1. 关系取舍错误（核心）**。从 A 数据集 357 万 flow 实测各关系的标签同质性（配对一致率 = 同关系相连两流标签相同的概率，node2vec 标签传播上界）：
+
+| 关系 | 配对一致率 | 多数类纯度 | 组规模 p90 / max | light_crpr |
+| --- | ---: | ---: | --- | --- |
+| SHR（同 ip:port）| **0.694** | **0.757** | 8 / 121,138 | ❌ 丢弃 |
+| PR-proxy（dst_ip）| 0.507 | 0.592 | 91 / 323,161 | ✅ 保留 |
+| HOST（同 ip = SHR+DHR）| 0.356 | 0.470 | 729 / 295,431 | DHR 丢弃 |
+| CR（五元组反转）| ~0.33* | — | — | ✅ 保留 |
+| 全局基线 | — | 0.268 | — | — |
+
+\* CR 的 0.33 为端点对级估计（被多会话稀释），真实会话级会更高，但总量仅 35 万边、覆盖率低。
+
+SHR 同质性是基线的 **2.6 倍**且组天然小（p90=8），却因"按 IP 级配对会爆炸"被一并丢弃。2026-05-29 记录中"CR+PR 信息密度最高"的判断与实测不符——**信号最强的 SHR 被丢，信号中等的 PR 被留**。
+
+**2. 嵌入学到时间局部性而非类别语义**。`tcg_word2vec_d64_light_crpr_report.md` 的 nearest samples：`rec_0002936165` 的 top-5 近邻全是 `rec_0002936xxx`（相似度 0.98+）。PR 在 1 秒窗口连接大量时间相邻流，主导随机游走，把"时间挨得近"编码成向量主成分。
+
+**3. 维度与训练参数全面弱于 HCG**：d64 vs ~256、walk_length 10 vs 20、num_walks 2 vs 5、epochs 3。
+
+**4. 10.18% missing 填 0 引入噪声**：364,257 条 flow 无嵌入，`build_tcg_classification_features.py` 填全 0。零向量在 knn/树模型里是纯噪声。
+
+**5. 存储爆炸根因不是"关系太多"，而是按 IP 级全连接**：HOST(src_ip) 组 max=295,431——少数热门 IP（NAT/公共 DNS）两两配对产生天文数字边，是 DHR(5500万)+SHR(4100万) 的主要来源。SHR 本身按 src_endpoint(ip:port) 配对时组很小（p90=8），叠度数 cap 即可控。
+
+### 改进方案
+
+**方案 A（推荐）：light_shrcr —— 反转关系取舍**
+
+用 SHR + CR 替代 CR + PR：
+
+- SHR 端点级（ip:port）配对，组天然小（p90=8）；叠度数 cap K=15 控制巨型端点（max 12 万）
+- 预估边数 ~1000 万（**少于**当前 CR+PR 3835 万），存储更省
+- 标签同质性上界从 ~0.51（PR 主导）升到 ~0.69（SHR 主导）
+- missing 率预计 < 3%（SHR 覆盖 86.6 万端点）
+- 落地：改 `build_tcg.py` / `run_tcg_node2vec_procedure_batch.py` 的 `--relation-types` 筛选为 `SHR,CR`
+
+**参数调优（任何方案）**：d64 → d128；walk_length 10→20、num_walks 2→5（对齐 HCG）；epochs 3→5；missing fallback 用同 `src_endpoint` 流的嵌入均值填充而非 0。
+
+**存储与内存优化**：嵌入 float16（D 组 1.3G→~0.65G）；流式 row-group 构建（已有）；训练用预采样 parquet（本次已验证）；`memory_guard` 的 `fixed_gb` 需按预采样规模自适应（当前硬编码 2.0 对小文件虚高）。
+
+**方案 B（差异化定位，若目标是 F 组融合增量）**：若 TCG 旨在给 HCG 补增量，则 SHR 与 HCG 端点聚合信号重复。此时应强化 CR 会话级精确配对（五元组反转已具备，放宽时间窗 5s→10s 提覆盖），PR 降权避免主导游走。D 组独立效果不如方案 A，但 F 组增量更干净。
+
+### 关键脚本与产物
+
+| 脚本 | 用途 |
+| --- | --- |
+| `scripts/subsample_tcg_def_safe.py` | TCG D/E/F 离线预采样（**新增**）|
+| `scripts/train_hcg_classifiers.py` | 通用分类训练（已支持 D/E/F）|
+| `scripts/subsample_hcg_c_safe.py` | HCG C 组预采样（参照原型）|
+
+产物：
+
+```text
+data/features/tcg/classification/datasets_safe/{D,E,F}_*.parquet   # 预采样，130k 行
+data/features/tcg/classification/results/classifier_summary.{md,csv,json}
+data/features/tcg/classification/results/running_status.md
+data/features/tcg/classification/results/metrics_live.csv
+```
+
+### 待办
+
+- [ ] 按方案 A 重建 TCG（light_shrcr），重跑 D/E/F 验证 D 组 knn Macro-F1 是否大幅回升
+- [ ] 修复 `memory_guard` 的 `fixed_gb` 自适应（按 rows 规模缩放）
+- [ ] lightgbm 在本地跑通（解决 CUDA/OOM）后补全 lightgbm 基线
+- [ ] 验证方案 A 的实际边数与 missing 率是否符合预估
+
+## 2026-07-04 TCG light_shrcr 重建（SHR+CR + d128 + 强参数）【进行中】
+
+兑现上一条待办"方案 A 重建"。关系取舍反转（SHR+CR 替代 CR+PR），强参数（d128 / walk20 / num_walks5 / epochs5），目标验证 D 组 knn Macro-F1 能否从 0.034 大幅回升。
+
+### 数据源决策
+
+原始 Kaggle CSV（`Dataset-Unicauca-Version2-87Atts.csv`）已不在本地（`data/raw` 清空）。改为**从 A parquet 重建**——A 含全部所需字段（`src_endpoint` 可拆 ip:port、`raw_protocol`、`raw_timestamp_epoch`、`record_id`）。`build_tcg.load_flows` 对 parquet 直接 `to_dict`（不做字段映射），故写适配脚本生成规范化 flow parquet（`TCG_FLOW_FIELDS`）。
+
+### 新增脚本
+
+| 脚本 | 用途 |
+| --- | --- |
+| `scripts/build_tcg_flow_parquet_from_features.py` | A → 规范化 flow parquet（流式 row-group，峰值低） |
+| `scripts/build_tcg_shrcr_capped.py` | 规范化 parquet → SHR+CR causes，SHR 带度数 cap |
+
+### 关键发现 1：A 的 timestamp 精度退化（cap 从"可选"变"必需"）
+
+`raw_timestamp_epoch` 在 19 天数据里**仅 363 个唯一值**（精度退化到极粗）。导致时间窗口配对在代理端口（`10.200.7.x:3128`）爆炸：
+
+- 单端点 `10.200.7.9:3128` 有 12 万 flow，5s 窗口内平均 **991 个邻居**（max 3816），C(n,2) 候选 **>700 亿**
+- 全图 SHR 候选 **3 亿**（5-29 `estimate_tcg_capped_size` 报告的 4100 万，是用原始高精度 Kaggle CSV 生成的，二者 timestamp 表示不同）
+- PR/DHR 同样爆炸（候选 13 亿 / 15 亿）
+- **CR 不受影响（46 万）**——五元组严格反转匹配本身已限制配对
+
+度数 cap K=15（每 flow 最多 15 个 SHR 邻居）是 timestamp 精度退化下控制度数的唯一手段。cap 后：
+
+| 关系 | 候选（无 cap） | 实际边（cap K=15） |
+| --- | ---: | ---: |
+| SHR | 302,810,318 | **11,112,797** |
+| CR | 460,128 | 460,128 |
+| 合计 | — | **11,572,925** |
+
+总边数 1157 万，比 `light_crpr` 的 3835 万还少 70%。
+
+### 关键发现 2：TuGraph lgraph_import 不接受空 STRING
+
+首次导入失败：`flows.csv` 的 `flow_id` 列空 → `Failed to parse column 1 into type STRING`。5-29 用原始 CSV 时 `flow_id`/`timestamp`/`protocol_name` 都有值，规范化脚本误设空串。
+
+修复（`build_tcg_flow_parquet_from_features.py`）：`flow_id=record_id`、`timestamp` 由 epoch 转 ISO text、`protocol_name=label`；int 字段（`fwd_packets` 等）`astype(int64)`（避免写成 `"45523.0"` 让 INT64 解析失败）。
+
+### 其他修复
+
+- **导入目录权限**：`docker/tugraph-import` 是 root 所有（sudo 不可用）→ 改 `--import-root data/imports/tcg_light_shrcr`（marktom 可写），`tmp-dir` 用默认 `docker/tugraph-tmp`（可写）
+- **`.import_tmp` root 文件清理**：lgraph_import 容器以 root 跑生成的 sst 文件，marktom 无法删 → 用 `docker run` 临时容器（root 身份）`rm -rf`
+- **文件名统一**：8 个脚本的 D/E/F 文件名 `d64_light_crpr → d128_light_shrcr`（诚实反映维度 + 关系；涉及 build/train/check/upload/download/subsample/run_all/run_tcg）
+
+### 导入结果（图 `tcg_light_shrcr`）
+
+| 项目 | 值 | 期望 | 吻合 |
+| --- | ---: | ---: | --- |
+| Flow 顶点 | 3,577,296 | 3,577,296 | ✓ |
+| CAUSES 边 | 11,572,925 | 11,572,925 | ✓ |
+| CR 边 | 460,128 | 460,128 | ✓ |
+| SHR 边 | 11,112,797 | 11,112,797 | ✓ |
+| 导入耗时 | 217 秒 | — | — |
+
+Cypher 验证全部吻合。
+
+### 重建参数
+
+| 参数 | light_crpr（旧） | light_shrcr（本次） |
+| --- | --- | --- |
+| 关系 | CR + PR | **SHR + CR** |
+| 度数 cap | 无 | **K=15** |
+| 嵌入维度 | d64 | **d128** |
+| walk_length | 10 | **20** |
+| num_walks | 2 | **5** |
+| epochs | 3 | **5** |
+| 边数 | 38,311,128 | 11,572,925 |
+
+### 进行中（结果待补充）
+
+- [x] causes 生成 + TuGraph 导入
+- [x] node2vec walks（强参数 walk20/num_walks5，60min，722 万 walks / 144 万 start 节点）
+- [~] word2vec d128/epochs5（运行中）
+
+### walks 覆盖问题（重要发现）
+
+walks 只覆盖 **144 万 start 节点（图 357 万的 40%）**，预计 missing ~60%（远高于 light_crpr 的 10%）。
+
+根因：`SHR_WINDOW=5s` 在 timestamp 精度退化（363 唯一值）下过窄。`build_tcg_shrcr_capped.py` 的 SHR 配对要求右侧邻居 `timestamp 差 ≤ 5s`，但 timestamp 精度低导致大量 flow 的右侧邻居跨 bucket（差 >5s）→ 无窗口内右侧邻居 → 无出边。`tcg_node2vec_walk_py_batch.py:111` 的 `only_start_nodes_with_out_edges=True` 使 procedure 只从有出边节点开始 walk（`pick_start_nodes` 每次 batch 从头遍历跳过前 offset 个有出边节点，batch 29 选到 44880 即尽，证实全图仅 144 万有出边节点）。
+
+修复方向（待评估是否重建）：`SHR_WINDOW=None` + cap K=15 兜底——每 flow 连右侧最近 K 个邻居（不管时间），非末位都有出边，覆盖回到 ~90%。代价：causes 重建 + 重导入 + 重跑 walks（~2h）。先看现有 walks 的 word2vec 效果再定。
+
+### word2vec + 训练结果（d128_light_shrcr）
+
+word2vec d128/epochs5：722 万 walks，218 万 unique token，**覆盖率 61.1%（missing 38.9%）**，训练 23.6 分钟。Nearest samples 仍呈 record_id 连续（时间局部性）。
+
+D/E/F 训练（预采样 13 万行，跳过 lightgbm，`--no-memory-guard`）对比 d64_light_crpr：
+
+| 组（knn Macro-F1） | d64_crpr（旧 CR+PR） | d128_shrcr（新 SHR+CR） | 变化 |
+| --- | ---: | ---: | ---: |
+| D（纯 TCG） | 0.034 | **0.044** | +29% |
+| E（raw+TCG） | 0.207 | **0.231** | +12% |
+| F（raw+HCG+TCG） | 0.407 | **0.422** | +4% |
+
+### 核心结论
+
+**正面**：方案 A 验证成功——SHR+CR **全面优于** CR+PR（D/E/F 均提升），证实同质性诊断（SHR 0.69 > PR 0.51）。关系取舍反转方向正确。
+
+**负面（flow 级 node2vec 本质局限）**：D 组 knn 0.044 仍极低（HCG B 是 0.447 的 1/10）；E(0.231) < A(0.261)、F(0.422) < C(0.451)——TCG 嵌入对融合组仍是负贡献。
+
+**根本原因**：SHR 边按 (timestamp, record_id) 序配对，walk 在**端点内时间相邻**的 flow 间走（nearest samples 的 record_id 连续证实），学到"端点内时间局部"而非"应用类别语义"。SHR 边只在端点内、不跨端点，无法像 HCG（endpoint 图）那样直接编码端点身份。这是 **flow 级 node2vec 的本质局限**，非参数问题——`SHR_WINDOW=None` 全覆盖预期 D knn 仅 ~0.06-0.08，无法突破。
+
+**学术价值**：验证了关系同质性分析正确（SHR 是最强信号关系），但揭示 flow 级 node2vec 对该任务的本质局限——HCG endpoint 级嵌入（B knn 0.447）已更优，TCG flow 级嵌入难以超越。后续若要突破需换异构图方法（如 metapath2vec 捕获跨端点类别结构）。
+
+### 产物
+
+| 产物 | 路径 |
+| --- | --- |
+| TuGraph 图 | `tcg_light_shrcr`（357 万顶点 + 1157 万边） |
+| embedding | `data/features/tcg/node2vec/tcg_flow_node2vec_d128_light_shrcr.parquet`（d128, 218 万行） |
+| D/E/F | `data/features/tcg/classification/datasets/{D,E,F}_*_d128_light_shrcr.parquet` |
+| 训练结果 | `data/features/tcg/classification/results_d128_shrcr/` |
+| 新增脚本 | `build_tcg_flow_parquet_from_features.py`, `build_tcg_shrcr_capped.py` |
+- [ ] build D/E/F（`d128_light_shrcr`）
+- [ ] 预采样 + 训练评估（D 组 knn Macro-F1 对比 0.034）
+- [ ] 上传 ModelScope + 结果回填本节

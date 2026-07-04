@@ -25,3 +25,4 @@ docker/tugraph-import-light/
 docker/tugraph-tmp/
 archive/
 logs/
+data/imports/

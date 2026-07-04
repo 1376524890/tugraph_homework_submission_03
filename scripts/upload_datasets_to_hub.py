@@ -16,9 +16,9 @@ DATASET_DESCRIPTIONS = {
     "A_raw_flow_features.parquet": "Dataset A: raw flow statistical features",
     "B_hcg_flow_emb_256.parquet": "Dataset B: HCG graph embedding flow features",
     "C_raw_plus_hcg_flow_emb.parquet": "Dataset C: raw + HCG features",
-    "D_tcg_flow_node2vec_d64_light_crpr.parquet": "Dataset D: TCG graph embedding flow features",
-    "E_raw_plus_tcg_d64_light_crpr.parquet": "Dataset E: raw + TCG features",
-    "F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet": "Dataset F: raw + HCG + TCG features",
+    "D_tcg_flow_node2vec_d128_light_shrcr.parquet": "Dataset D: TCG graph embedding flow features",
+    "E_raw_plus_tcg_d128_light_shrcr.parquet": "Dataset E: raw + TCG features",
+    "F_raw_plus_hcg_plus_tcg_d128_light_shrcr.parquet": "Dataset F: raw + HCG + TCG features",
 }
 
 
@@ -34,7 +34,7 @@ def collect_upload_files(dataset_dir: Path, include_derived: bool) -> list[tuple
 
 def render_readme(files_to_upload: list[tuple[str, str]]) -> str:
     rows = []
-    for filename, description in files_to_upload:
+    for filename, description in DATASET_DESCRIPTIONS.items():
         rows.append(f"| `{filename}` | {description} |")
     file_table = "\n".join(rows) if rows else "| _No parquet files uploaded_ | - |"
     return f"""---

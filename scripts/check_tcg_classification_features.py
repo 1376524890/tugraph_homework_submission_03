@@ -132,9 +132,9 @@ def main() -> int:
     c_feature_cols = [col for col in c_cols if col not in meta_cols]
 
     datasets = {
-        "D": args.dataset_dir / "D_tcg_flow_node2vec_d64_light_crpr.parquet",
-        "E": args.dataset_dir / "E_raw_plus_tcg_d64_light_crpr.parquet",
-        "F": args.dataset_dir / "F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet",
+        "D": args.dataset_dir / "D_tcg_flow_node2vec_d128_light_shrcr.parquet",
+        "E": args.dataset_dir / "E_raw_plus_tcg_d128_light_shrcr.parquet",
+        "F": args.dataset_dir / "F_raw_plus_hcg_plus_tcg_d128_light_shrcr.parquet",
     }
 
     results = {}

@@ -32,9 +32,9 @@ DEFAULT_REPO_ID = "MarkTom/IP-Network-Flow-Graph"
 
 HCG_FILES = ["A_raw_flow_features.parquet", "B_hcg_flow_emb_256.parquet"]
 TCG_FILES = [
-    "D_tcg_flow_node2vec_d64_light_crpr.parquet",
-    "E_raw_plus_tcg_d64_light_crpr.parquet",
-    "F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet",
+    "D_tcg_flow_node2vec_d128_light_shrcr.parquet",
+    "E_raw_plus_tcg_d128_light_shrcr.parquet",
+    "F_raw_plus_hcg_plus_tcg_d128_light_shrcr.parquet",
 ]
 
 
@@ -136,11 +136,11 @@ def synthesize_ef(dataset_dir: Path):
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    d_path = dataset_dir / "D_tcg_flow_node2vec_d64_light_crpr.parquet"
+    d_path = dataset_dir / "D_tcg_flow_node2vec_d128_light_shrcr.parquet"
     a_path = ROOT / "data/features/hcg/classification/datasets" / "A_raw_flow_features.parquet"
     c_path = ROOT / "data/features/hcg/classification/datasets" / "C_raw_plus_hcg_flow_emb.parquet"
-    e_path = dataset_dir / "E_raw_plus_tcg_d64_light_crpr.parquet"
-    f_path = dataset_dir / "F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet"
+    e_path = dataset_dir / "E_raw_plus_tcg_d128_light_shrcr.parquet"
+    f_path = dataset_dir / "F_raw_plus_hcg_plus_tcg_d128_light_shrcr.parquet"
 
     if e_path.exists() and f_path.exists():
         print("  E/F already exist, skipping synthesis")

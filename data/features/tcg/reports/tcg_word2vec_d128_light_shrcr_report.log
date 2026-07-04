@@ -1,0 +1,30 @@
+2026-07-04 19:07:50 INFO TCG Word2Vec training started
+2026-07-04 19:07:50 INFO walks=/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_walks_d128_light_shrcr.txt size=749118255 bytes
+2026-07-04 19:07:50 INFO id_map=/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_node_id_map_d128_light_shrcr.csv size=51716120 bytes
+2026-07-04 19:07:50 INFO parameters: vector_size=128 window=5 min_count=1 sg=1 negative=5 sample=0.0001 epochs=5 workers=4 seed=20260528 max_lines=0
+2026-07-04 19:07:50 INFO reading id map: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_node_id_map_d128_light_shrcr.csv
+2026-07-04 19:07:54 INFO id map loaded: 2185404 tokens
+2026-07-04 19:07:54 INFO summarizing walks: /home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_walks_d128_light_shrcr.txt max_lines=0
+2026-07-04 19:08:06 INFO walk summary finished: lines=7224400 unique_tokens=2185404 avg_len=6.9129
+2026-07-04 19:08:06 INFO initializing Word2Vec model
+2026-07-04 19:08:06 INFO building Word2Vec vocabulary
+2026-07-04 19:08:51 INFO vocabulary built: vocab=2185404 corpus_count=7224400 corpus_total_words=49941217
+2026-07-04 19:08:51 INFO training Word2Vec
+2026-07-04 19:08:51 INFO training epoch 1/5 started
+2026-07-04 19:13:30 INFO training epoch 1/5 finished in 279.28s
+2026-07-04 19:13:30 INFO training epoch 2/5 started
+2026-07-04 19:18:00 INFO training epoch 2/5 finished in 269.76s
+2026-07-04 19:18:00 INFO training epoch 3/5 started
+2026-07-04 19:22:07 INFO training epoch 3/5 finished in 247.10s
+2026-07-04 19:22:07 INFO training epoch 4/5 started
+2026-07-04 19:26:07 INFO training epoch 4/5 finished in 240.22s
+2026-07-04 19:26:07 INFO training epoch 5/5 started
+2026-07-04 19:30:08 INFO training epoch 5/5 finished in 240.38s
+2026-07-04 19:30:08 INFO saving gensim model: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/node2vec/tcg_flow_node2vec_d128_light_shrcr.model
+2026-07-04 19:30:50 INFO gensim model saved
+2026-07-04 19:30:50 INFO building embedding dataframe
+2026-07-04 19:30:59 INFO writing parquet: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/node2vec/tcg_flow_node2vec_d128_light_shrcr.parquet rows=2185404 dim=128
+2026-07-04 19:31:23 INFO parquet write finished
+2026-07-04 19:31:24 INFO computing nearest samples: 10
+2026-07-04 19:31:26 INFO reports written: /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d128_light_shrcr_report.md /home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d128_light_shrcr_report.json
+2026-07-04 19:31:26 INFO TCG Word2Vec training finished: status=PASS elapsed=1415.91s

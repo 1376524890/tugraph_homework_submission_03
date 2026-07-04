@@ -1,0 +1,451 @@
+{
+  "inputs": {
+    "walks": "/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_walks_d128_light_shrcr.txt",
+    "id_map": "/home/marktom/tugraph/tugraph_homework_submission_03/docker/tugraph-tmp/tcg_node_id_map_d128_light_shrcr.csv"
+  },
+  "outputs": {
+    "parquet": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/node2vec/tcg_flow_node2vec_d128_light_shrcr.parquet",
+    "model": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/node2vec/tcg_flow_node2vec_d128_light_shrcr.model",
+    "report": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d128_light_shrcr_report.md",
+    "json_report": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d128_light_shrcr_report.json",
+    "log_file": "/home/marktom/tugraph/tugraph_homework_submission_03/data/features/tcg/reports/tcg_word2vec_d128_light_shrcr_report.log"
+  },
+  "parameters": {
+    "vector_size": 128,
+    "window": 5,
+    "min_count": 1,
+    "sg": 1,
+    "negative": 5,
+    "sample": 0.0001,
+    "epochs": 5,
+    "workers": 4,
+    "seed": 20260528,
+    "max_lines": 0
+  },
+  "dependencies": {
+    "gensim": "4.4.0",
+    "numpy": "2.4.6",
+    "pandas": "3.0.3",
+    "pyarrow": "24.0.0"
+  },
+  "metrics": {
+    "walk_line_count": 7224400,
+    "sentence_count": 7224400,
+    "empty_line_count": 0,
+    "average_walk_length": 6.912853247328498,
+    "min_walk_length": 2,
+    "max_walk_length": 20,
+    "walk_unique_token_count": 2185404,
+    "id_map_token_count": 2185404,
+    "word2vec_vocab_token_count": 2185404,
+    "parquet_row_count": 2185404,
+    "missing_id_map_token_count": 0,
+    "id_map_coverage": 1.0,
+    "nan_count": 0,
+    "inf_count": 0,
+    "embedding_columns": [
+      "emb_000",
+      "emb_001",
+      "emb_002",
+      "emb_003",
+      "emb_004",
+      "emb_005",
+      "emb_006",
+      "emb_007",
+      "emb_008",
+      "emb_009",
+      "emb_010",
+      "emb_011",
+      "emb_012",
+      "emb_013",
+      "emb_014",
+      "emb_015",
+      "emb_016",
+      "emb_017",
+      "emb_018",
+      "emb_019",
+      "emb_020",
+      "emb_021",
+      "emb_022",
+      "emb_023",
+      "emb_024",
+      "emb_025",
+      "emb_026",
+      "emb_027",
+      "emb_028",
+      "emb_029",
+      "emb_030",
+      "emb_031",
+      "emb_032",
+      "emb_033",
+      "emb_034",
+      "emb_035",
+      "emb_036",
+      "emb_037",
+      "emb_038",
+      "emb_039",
+      "emb_040",
+      "emb_041",
+      "emb_042",
+      "emb_043",
+      "emb_044",
+      "emb_045",
+      "emb_046",
+      "emb_047",
+      "emb_048",
+      "emb_049",
+      "emb_050",
+      "emb_051",
+      "emb_052",
+      "emb_053",
+      "emb_054",
+      "emb_055",
+      "emb_056",
+      "emb_057",
+      "emb_058",
+      "emb_059",
+      "emb_060",
+      "emb_061",
+      "emb_062",
+      "emb_063",
+      "emb_064",
+      "emb_065",
+      "emb_066",
+      "emb_067",
+      "emb_068",
+      "emb_069",
+      "emb_070",
+      "emb_071",
+      "emb_072",
+      "emb_073",
+      "emb_074",
+      "emb_075",
+      "emb_076",
+      "emb_077",
+      "emb_078",
+      "emb_079",
+      "emb_080",
+      "emb_081",
+      "emb_082",
+      "emb_083",
+      "emb_084",
+      "emb_085",
+      "emb_086",
+      "emb_087",
+      "emb_088",
+      "emb_089",
+      "emb_090",
+      "emb_091",
+      "emb_092",
+      "emb_093",
+      "emb_094",
+      "emb_095",
+      "emb_096",
+      "emb_097",
+      "emb_098",
+      "emb_099",
+      "emb_100",
+      "emb_101",
+      "emb_102",
+      "emb_103",
+      "emb_104",
+      "emb_105",
+      "emb_106",
+      "emb_107",
+      "emb_108",
+      "emb_109",
+      "emb_110",
+      "emb_111",
+      "emb_112",
+      "emb_113",
+      "emb_114",
+      "emb_115",
+      "emb_116",
+      "emb_117",
+      "emb_118",
+      "emb_119",
+      "emb_120",
+      "emb_121",
+      "emb_122",
+      "emb_123",
+      "emb_124",
+      "emb_125",
+      "emb_126",
+      "emb_127"
+    ],
+    "vector_size": 128,
+    "training_elapsed_seconds": 1415.9073655120155,
+    "training_elapsed_minutes": 23.598456091866925,
+    "seed": 20260528,
+    "id_map_coverage_percent": 100.0
+  },
+  "checks": {
+    "walks_read": true,
+    "vocab_non_empty": true,
+    "parquet_rows_equal_vocab": true,
+    "no_nan": true,
+    "no_inf": true,
+    "id_map_no_missing_tokens": true,
+    "record_id_non_empty": true,
+    "record_id_unique": true,
+    "vocab_equals_walk_unique_tokens": true
+  },
+  "overall_status": "PASS",
+  "nearest_samples": [
+    {
+      "record_id": "rec_0000594837",
+      "nearest": [
+        {
+          "record_id": "rec_0000594835",
+          "similarity": 0.9898316860198975
+        },
+        {
+          "record_id": "rec_0000593076",
+          "similarity": 0.9863507747650146
+        },
+        {
+          "record_id": "rec_0000593148",
+          "similarity": 0.9858624339103699
+        },
+        {
+          "record_id": "rec_0000593420",
+          "similarity": 0.9855058789253235
+        },
+        {
+          "record_id": "rec_0000593011",
+          "similarity": 0.9853011965751648
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0000594826",
+      "nearest": [
+        {
+          "record_id": "rec_0000594822",
+          "similarity": 0.9940376877784729
+        },
+        {
+          "record_id": "rec_0000594809",
+          "similarity": 0.9888168573379517
+        },
+        {
+          "record_id": "rec_0000591833",
+          "similarity": 0.9864049553871155
+        },
+        {
+          "record_id": "rec_0000592601",
+          "similarity": 0.985567569732666
+        },
+        {
+          "record_id": "rec_0000591898",
+          "similarity": 0.9847336411476135
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0000101882",
+      "nearest": [
+        {
+          "record_id": "rec_0000101643",
+          "similarity": 0.9973957538604736
+        },
+        {
+          "record_id": "rec_0000101712",
+          "similarity": 0.9969693422317505
+        },
+        {
+          "record_id": "rec_0000101682",
+          "similarity": 0.9963154196739197
+        },
+        {
+          "record_id": "rec_0000101722",
+          "similarity": 0.9961612820625305
+        },
+        {
+          "record_id": "rec_0000101638",
+          "similarity": 0.9958739280700684
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0000101884",
+      "nearest": [
+        {
+          "record_id": "rec_0000101845",
+          "similarity": 0.9968226552009583
+        },
+        {
+          "record_id": "rec_0000004379",
+          "similarity": 0.9967559576034546
+        },
+        {
+          "record_id": "rec_0000101868",
+          "similarity": 0.9964479207992554
+        },
+        {
+          "record_id": "rec_0000101618",
+          "similarity": 0.9961153864860535
+        },
+        {
+          "record_id": "rec_0000101215",
+          "similarity": 0.9959661364555359
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0000101727",
+      "nearest": [
+        {
+          "record_id": "rec_0000101704",
+          "similarity": 0.9962158799171448
+        },
+        {
+          "record_id": "rec_0000101166",
+          "similarity": 0.9962045550346375
+        },
+        {
+          "record_id": "rec_0000101156",
+          "similarity": 0.9959670901298523
+        },
+        {
+          "record_id": "rec_0000101025",
+          "similarity": 0.9959533214569092
+        },
+        {
+          "record_id": "rec_0000101310",
+          "similarity": 0.9958270788192749
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0000594832",
+      "nearest": [
+        {
+          "record_id": "rec_0000594830",
+          "similarity": 0.9938944578170776
+        },
+        {
+          "record_id": "rec_0000594821",
+          "similarity": 0.9910950660705566
+        },
+        {
+          "record_id": "rec_0000594813",
+          "similarity": 0.9892662167549133
+        },
+        {
+          "record_id": "rec_0000590628",
+          "similarity": 0.9848124384880066
+        },
+        {
+          "record_id": "rec_0000594794",
+          "similarity": 0.9841158390045166
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0000101864",
+      "nearest": [
+        {
+          "record_id": "rec_0000101459",
+          "similarity": 0.9973946213722229
+        },
+        {
+          "record_id": "rec_0000101792",
+          "similarity": 0.9973403811454773
+        },
+        {
+          "record_id": "rec_0000101713",
+          "similarity": 0.997189462184906
+        },
+        {
+          "record_id": "rec_0000101777",
+          "similarity": 0.9970706105232239
+        },
+        {
+          "record_id": "rec_0000101259",
+          "similarity": 0.9964962005615234
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0000101705",
+      "nearest": [
+        {
+          "record_id": "rec_0000101656",
+          "similarity": 0.991449236869812
+        },
+        {
+          "record_id": "rec_0000059017",
+          "similarity": 0.9913403391838074
+        },
+        {
+          "record_id": "rec_0000100860",
+          "similarity": 0.990866482257843
+        },
+        {
+          "record_id": "rec_0000101322",
+          "similarity": 0.9888671636581421
+        },
+        {
+          "record_id": "rec_0000053936",
+          "similarity": 0.9881006479263306
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0000101890",
+      "nearest": [
+        {
+          "record_id": "rec_0000101604",
+          "similarity": 0.9913386702537537
+        },
+        {
+          "record_id": "rec_0000101714",
+          "similarity": 0.9897940754890442
+        },
+        {
+          "record_id": "rec_0000100928",
+          "similarity": 0.9889764785766602
+        },
+        {
+          "record_id": "rec_0000101737",
+          "similarity": 0.9881728887557983
+        },
+        {
+          "record_id": "rec_0000101833",
+          "similarity": 0.9879088997840881
+        }
+      ]
+    },
+    {
+      "record_id": "rec_0000128443",
+      "nearest": [
+        {
+          "record_id": "rec_0000128351",
+          "similarity": 0.9950180649757385
+        },
+        {
+          "record_id": "rec_0000128378",
+          "similarity": 0.994939386844635
+        },
+        {
+          "record_id": "rec_0000128218",
+          "similarity": 0.9948939681053162
+        },
+        {
+          "record_id": "rec_0000128423",
+          "similarity": 0.9947940707206726
+        },
+        {
+          "record_id": "rec_0000128364",
+          "similarity": 0.9947269558906555
+        }
+      ]
+    }
+  ],
+  "join_design": {
+    "level": "Flow",
+    "join_key": "record_id",
+    "embedding_dim": 128
+  }
+}

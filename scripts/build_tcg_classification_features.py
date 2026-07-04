@@ -127,9 +127,9 @@ def main() -> int:
     c_feats = [c for c in c_schema if c not in a_meta]
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    d_path = args.output_dir / "D_tcg_flow_node2vec_d64_light_crpr.parquet"
-    e_path = args.output_dir / "E_raw_plus_tcg_d64_light_crpr.parquet"
-    f_path = args.output_dir / "F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet"
+    d_path = args.output_dir / "D_tcg_flow_node2vec_d128_light_shrcr.parquet"
+    e_path = args.output_dir / "E_raw_plus_tcg_d128_light_shrcr.parquet"
+    f_path = args.output_dir / "F_raw_plus_hcg_plus_tcg_d128_light_shrcr.parquet"
 
     if args.dry_run:
         print(f"DRY RUN: D(meta+emb), E(A+emb), F(C+emb)", flush=True)

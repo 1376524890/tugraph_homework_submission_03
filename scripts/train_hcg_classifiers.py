@@ -64,9 +64,9 @@ DATASET_FILES = {
     "A": "A_raw_flow_features.parquet",
     "B": "B_hcg_flow_emb_256.parquet",
     "C": "C_raw_plus_hcg_flow_emb.parquet",
-    "D": "D_tcg_flow_node2vec_d64_light_crpr.parquet",
-    "E": "E_raw_plus_tcg_d64_light_crpr.parquet",
-    "F": "F_raw_plus_hcg_plus_tcg_d64_light_crpr.parquet",
+    "D": "D_tcg_flow_node2vec_d128_light_shrcr.parquet",
+    "E": "E_raw_plus_tcg_d128_light_shrcr.parquet",
+    "F": "F_raw_plus_hcg_plus_tcg_d128_light_shrcr.parquet",
 }
 META_COLUMNS = {"record_id", "target", "split", "src_endpoint", "dst_endpoint"}
 DEFAULT_MODEL_ALIASES = {
