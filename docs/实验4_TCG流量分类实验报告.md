@@ -83,6 +83,14 @@ PYTHONPATH=src python scripts/build_tcg_shrcr_capped.py
 PYTHONPATH=src python scripts/import_tugraph_native.py --graph-type tcg --graph tcg_light_shrcr
 ```
 
+导入完成后的 TCG 图概览如下，含 3577296 个 Flow 顶点、11572925 条 CAUSES 边：
+
+![TCG 图导入概览](figures/screenshot_tcg_import.png)
+
+进入图的可视化界面，可查看单个 Flow 顶点的结构。顶点以 record_id 为主键，携带 timestamp、duration、protocol 等流级属性：
+
+![TCG 流节点详情展示](figures/screenshot_tcg_detail.png)
+
 >
 
 ### 2.6 TCG 图及嵌入参数

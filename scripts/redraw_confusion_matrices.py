@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""重绘混淆矩阵：magma + LogNorm + 0值浅灰背景 + seaborn heatmap"""
+"""重绘混淆矩阵：YlOrRd 线性色阶 + 0值浅灰背景 + seaborn heatmap"""
 from __future__ import annotations
 from pathlib import Path
 import matplotlib; matplotlib.use("Agg")
@@ -15,14 +15,14 @@ _RO = Path(__file__).resolve().parents[1]; _OUT = _RO / "docs/figures"; _OUT.mkd
 _SEED = 20260525
 
 def draw_confusion(cm, labels, title, outpath, top_n=20):
-    """Seaborn heatmap with LogNorm + magma + 0 as light-gray"""
+    """Seaborn heatmap with YlOrRd linear + 0 as light-gray"""
     cm = cm.astype(float); cm[cm == 0] = np.nan
-    cmap = plt.get_cmap("magma").copy(); cmap.set_bad("#eeeeee")
+    cmap = plt.get_cmap("YlOrRd").copy(); cmap.set_bad("#eeeeee")
     fig, ax = plt.subplots(figsize=(13, 10))
-    sns.heatmap(cm, cmap=cmap, norm=LogNorm(vmin=1, vmax=np.nanmax(cm)),
+    sns.heatmap(cm, cmap=cmap,
                 annot=True, fmt=".0f", xticklabels=labels, yticklabels=labels,
                 linewidths=0.4, linecolor="white", ax=ax,
-                cbar_kws={"label": "Count (log scale)", "shrink": 0.8})
+                cbar_kws={"label": "Count", "shrink": 0.8})
     ax.set_title(title, fontsize=15); ax.set_xlabel("Predicted"); ax.set_ylabel("True")
     plt.xticks(rotation=90); plt.yticks(rotation=0)
     fig.tight_layout(); fig.savefig(outpath, dpi=150); plt.close()
@@ -69,7 +69,7 @@ clf_rf=RandomForestClassifier(n_estimators=50,max_depth=20,n_jobs=-1,random_stat
 pred=clf_rf.predict(Xtest)
 top20=np.argsort(np.bincount(y_test))[-20:]; mask=np.isin(y_test,top20)&np.isin(pred,top20)
 cm=confusion_matrix(y_test[mask],pred[mask],labels=top20)
-draw_confusion(cm,[le.classes_[i] for i in top20],"HCG C Group RF Confusion (top-20, log-scale)",_OUT/"h3_c_rf_confusion.png")
+draw_confusion(cm,[le.classes_[i] for i in top20],"HCG C Group RF Confusion (top-20)",_OUT/"h3_c_rf_confusion.png")
 
 # ---- 混淆矩阵2: D_te Logistic ----
 print("D_te logistic...", flush=True)
@@ -77,6 +77,6 @@ sD=StandardScaler(with_mean=False); Xtr=sD.fit_transform(D_te_X[tr_mask]); Xtest
 clf_lr=SGDClassifier(loss="log_loss",max_iter=100,random_state=_SEED).fit(Xtr,y_tr)
 pred2=clf_lr.predict(Xtest)
 cm2=confusion_matrix(y_test[mask],pred2[mask],labels=top20)
-draw_confusion(cm2,[le.classes_[i] for i in top20],"D_te Group Logistic Confusion (top-20, log-scale)",_OUT/"h4_dte_logistic_confusion.png")
+draw_confusion(cm2,[le.classes_[i] for i in top20],"D_te Group Logistic Confusion (top-20)",_OUT/"h4_dte_logistic_confusion.png")
 
 print("Done.", flush=True)

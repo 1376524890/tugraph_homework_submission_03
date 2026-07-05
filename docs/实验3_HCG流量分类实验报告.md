@@ -27,10 +27,6 @@ path = kagglehub.dataset_download("jsrochas/ip-network-traffic-flows-labeled-wit
 
 A 组特征表的结构如下：前五列为元信息 record_id、target、split、src_endpoint、dst_endpoint，其余 91 列为 raw_ 前缀的统计特征。
 
-![数据集 A 组 parquet 展示](figures/screenshot_dataset.png)
-
->
-
 ## 二、HCG 图建模方法
 
 ### 2.1 建模思路
@@ -98,9 +94,13 @@ MATCH (n:Endpoint) RETURN count(n)            -- 935600
 MATCH ()-[r:COMMUNICATES]->() RETURN count(r) -- 1716084
 ```
 
-![HCG 图 schema](figures/screenshot_schema.png)
+导入完成后的 HCG 图概览如下，含 935600 个端点顶点、1716084 条通信边：
 
-![HCG 导入输出](figures/screenshot_import.png)
+![HCG 图导入概览](figures/screenshot_hcg_import.png)
+
+进入图的可视化界面，可查看单个 Endpoint 顶点的结构。顶点以 endpoint_id 为主键，携带 ip、port_bucket、is_proxy_port、is_common_service_port 等派生属性：
+
+![HCG 端点节点详情展示](figures/screenshot_hcg_detail.png)
 
 >
 
@@ -129,8 +129,6 @@ MATCH ()-[r:COMMUNICATES]->() RETURN count(r) -- 1716084
 ### 3.2 随机游走与 word2vec 训练
 
 HCG 的游走在 TuGraph 内通过 Python 存储过程执行，以 flow_count 为边权并做 log1p 平滑，避免热门端点对主导游走。参数 p、q 均设为 1，对应标准 DeepWalk；walk_length 取 20，num_walks 取 5，每个端点出发 5 条长度 20 的游走：
-
-![node2vec walk 文件样本](figures/screenshot_walk.png)
 
 ```python
 params = {

@@ -26,3 +26,6 @@ docker/tugraph-tmp/
 archive/
 logs/
 data/imports/
+
+# 微信原始截图（已规范化复制到 docs/figures/，根目录原件不入库）
+微信图片_*.png
