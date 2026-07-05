@@ -67,6 +67,9 @@ DATASET_FILES = {
     "D": "D_tcg_flow_node2vec_d128_light_shrcr.parquet",
     "E": "E_raw_plus_tcg_d128_light_shrcr.parquet",
     "F": "F_raw_plus_hcg_plus_tcg_d128_light_shrcr.parquet",
+    "D_te": "D_te_src_dst_target_encoding.parquet",
+    "E_te": "E_te_raw_plus_target_encoding.parquet",
+    "F_te": "F_te_raw_hcg_plus_target_encoding.parquet",
 }
 META_COLUMNS = {"record_id", "target", "split", "src_endpoint", "dst_endpoint"}
 DEFAULT_MODEL_ALIASES = {
