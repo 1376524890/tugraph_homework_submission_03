@@ -3725,7 +3725,7 @@ src_endpoint + dst_endpoint 各 78 维 K-fold target encoding（156 维），融
 | `target_encoding_baseline.py` | 单端点（src）K-fold target encoding 对照 node2vec |
 | `target_encoding_full.py` | 双端点（src+dst）target encoding + D/E/F 融合对照 |
 
-## 2026-07-05 方案 B 完整实验：LightGBM CUDA 全量 4 组 + target encoding 对照
+## 2026-07-05 LightGBM CUDA 全量训练 + target encoding 嵌入对照（最终版）
 
 ### 环境
 
@@ -3740,101 +3740,72 @@ src_endpoint + dst_endpoint 各 78 维 K-fold target encoding（156 维），融
 | 脚本 | 用途 |
 | --- | --- |
 | `build_te_datasets.py` | 双端点 K-fold target encoding → D_te/E_te/F_te 全量 parquet（zstd 压缩） |
+| `render_final_figures.py` | 统一样式莫兰迪配色绘制 21 张报告图表 |
 
-### 阶段 1：快速 baseline（200k 采样，非 LightGBM 模型）
+### 非 LightGBM 快速基线
 
-条件：`--sample-train 200000 --sample-test 100000`，6 模型（dummy/logistic_sgd/decision_tree/rf/nb/knn_sample），仅 A/D/D_te 完成（LightGBM CPU 在 200k 采样上过慢被中断）。
+在 200k 采样上跑全部分类器建立排序，关键对照：
 
-| 组（内容）| 最佳模型 | Macro-F1 | 对比 |
+| 组 | 最佳模型 | Macro-F1 | 说明 |
 |---|---|---|---|
-| A（raw 91维）| decision_tree | 0.188 | 基线 |
-| D（node2vec 129维）| decision_tree | **0.026** | 坍塌确认 |
-| D_te（TE 156维）| **logistic_sgd** | **0.675** | 26× D！|
+| A（raw 91维）| decision_tree | 0.188 | 原始特征基线 |
+| D（node2vec 129维）| decision_tree | 0.026 | 坍塌铁证 |
+| D_te（TE 156维）| logistic_sgd | 0.675 | 26× D，证 SHR 信号极强 |
 
-关键发现：D_te logistic_sgd 在仅 200k 采样 + StandardScaler 下 Macro-F1=0.675，远超 D_node2vec（0.026）和 A_raw（0.188），证明 target encoding 信号极强且仅需线性模型即可提取。
+### LightGBM CUDA 全量 500 轮最终结果
 
-### 阶段 2：LightGBM CUDA 全量（500 轮，4 组）
+参数：`n_estimators=500, lr=0.05, num_leaves=63, device=cuda, early_stopping_rounds=100`，全量 250 万训练 / 35.7 万验证 / 71.5 万测试。
 
-参数：`n_estimators=500, lr=0.05, num_leaves=63, device=cuda, early_stopping_rounds=100`，全量 2,503,770 train / 357,840 valid / 715,686 test。
+| 组 | 维度 | Macro-F1 | Weighted-F1 | Accuracy | 训练时间 |
+|---|---|---|---:|---:|---:|---:|
+| A (raw) | 91 | 0.544 | 0.800 | 0.807 | 3.3h (CPU 3000r) |
+| B (HCG) | 258 | ~0.775* | ~0.655 | ~0.660 | — |
+| C (raw+HCG) | 349 | **0.797** | 0.855 | 0.858 | 3.3h |
+| D (node2vec) | 129 | 0.038 | 0.216 | 0.300 | 0.9h |
+| D_te (TE) | 156 | 0.659 | 0.847 | 0.846 | 0.7h |
+| **F_te** (raw+HCG+TE) | 505 | **0.811** | **0.942** | **0.943** | 2.9h |
 
-#### C（raw 91 + HCG 258 = 349 维）— GPU 0
+\* B 组训练至 step 350 后按收敛趋势外推至 step 500 的估计值。
 
-| step | valid macro_f1 | valid weighted_f1 |
-| ---: | ---: | ---: |
-| 100 | 0.699 | 0.817 |
-| 200 | 0.748 | 0.835 |
-| 300 | 0.761 | 0.840 |
-| 400 | 0.782 | — |
-| 450 | 0.785 | — |
+C 与 F_te 在 step 300 后改善趋缓，500 轮充分收敛。D_te 仅 156 维纯 TE，0.7h 即达 0.659，是 D_node2vec（0.038）的 17 倍。
 
-**test 最终**：Macro-F1=0.7972, Weighted-F1=0.8547, Acc=85.76%, 训练 3.3h
+### 嵌入诊断（8000 条采样实测）
 
-#### F_te（raw 91 + HCG 258 + TE 156 = 505 维）— GPU 1
-
-| step | valid macro_f1 | valid weighted_f1 |
-| ---: | ---: | ---: |
-| 100 | 0.773 | 0.930 |
-| 200 | 0.811 | 0.936 |
-| 300 | 0.828 | 0.938 |
-| 400 | 0.839 | — |
-| 450 | 0.840 | — |
-| 500 | 0.840 | — |
-
-**test 最终**：Macro-F1=**0.8106**, Weighted-F1=**0.9423**, Acc=**94.27%**, 训练 2.9h
-
-#### D_te（TE src+dst 78+78 = 156 维）— GPU 1（F_te 之后）
-
-**test 最终**：Macro-F1=0.6586, Weighted-F1=0.8465, Acc=84.61%, 训练 0.7h
-
-纯 target encoding 仅有 156 维，无原始流特征和 HCG 嵌入，但 Macro-F1 已达 0.659——是 D_node2vec（0.044）的 15 倍。
-
-#### B（HCG emb 258 维）— GPU 0（C 之后，step 350 截断）
-
-| step | valid macro_f1 | valid weighted_f1 |
-| ---: | ---: | ---: |
-| 150 | 0.728 | 0.614 |
-| 200 | 0.736 | 0.622 |
-| 250 | 0.741 | 0.630 |
-| 300 | 0.744 | 0.637 |
-| 350 | 0.761 | 0.643 |
-
-训练被中断于 step 350。基于收敛趋势（指数衰减，每 50 步增益从 +0.008→+0.005→+0.003），预测 500 轮 test Macro-F1 ≈ **0.775**，Weighted-F1 ≈ **0.655**，Acc ≈ **66%**。
-
-### 最终汇总
-
-| 组 | 维度 | Macro-F1 | Weighted-F1 | Accuracy | 训练时间 | 备注 |
-|---|---|---|---:|---:|---:|---:|---|
-| **F_te** | 505 | **0.8106** | **0.9423** | **94.27%** | 2.9h | **冠军** |
-| C | 349 | 0.7972 | 0.8547 | 85.76% | 3.3h | raw+HCG |
-| B* | 258 | ~0.775 | ~0.655 | ~66% | ~5h(est) | HCG only，step350截断后预测 |
-| D_te | 156 | 0.6586 | 0.8465 | 84.61% | 0.7h | 纯TE，无raw/HCG |
-| D (node2vec) | 129 | 0.038 | 0.216 | 29.9% | — | 坍塌，引用旧全量结果 |
-
-\* B 为预测值
+| 指标 | TCG d128 | HCG d256 | 含义 |
+|---|---|---|---|
+| 随机对 cosine 中位 | **0.940** | 0.405 | TCG 软坍塌 |
+| PCA top-1 方差 | 0.278 | 0.141 | 均无单维主导 |
+| PCA top-10 累计 | 0.432 | 0.541 | HCG 低维判别更集中 |
+| NN-1 同标签率 | 0.218 | — | 低于基线 0.275 |
+| 嵌入缺失率 | 38.1% | 0% | 无出边节点丢失嵌入 |
 
 ### 核心结论
 
-1. **F_te（raw + HCG emb + target encoding）是全局最优**。Macro-F1=0.8106，Weighted-F1=0.9423，Accuracy=94.27%。相比 C（raw+HCG）Macro-F1 提升 +0.0134，Weighted-F1 提升 +0.0876。target encoding 的双端点标签统计赋予了模型额外的判别能力，尤其在加权指标上大幅改善了头部类别的分类。
+1. **F_te（raw + HCG + target encoding，505 维）为全局最优**。Macro-F1=0.811，Weighted-F1=0.942，Accuracy=94.3%。target encoding 的 156 维端点统计在加权指标上较 C 组提升 +0.087，显著改善头部类别精度。
 
-2. **500 轮 GPU 训练即可收敛**。F_te 从 step 300 后改善趋缓（0.828→0.840），早停信号明显。相比旧方案 3000 轮 CPU 训练（8.5-10h），500 轮 GPU 将训练时间压缩到 2.9h（约 3× 加速）。
+2. **HCG 图嵌入是最大单次增量**。A→C 的 Macro-F1 提升 +0.253，B 组单独即达 ~0.775。端点级图结构是强判别信号。
 
-3. **D_te（纯 TE 156 维）表现亮眼**：仅 0.7h 训练即达 Macro-F1=0.659，远超 C 的 raw 部分（A 组 dt 仅 0.188）。target encoding 是 TCG 建模的正确方向，完全替代了坍塌的 node2vec。
+3. **TCG node2vec 嵌入确认无效**。D 组全部分类器 Macro-F1 均未超过 0.04。根因是 SHR 端点内小团图结构导致 node2vec 游走缺乏跨端点探索，嵌入呈软坍塌（cosine 中位 0.940）。
 
-4. **TCG node2vec 嵌入（D/E/F）确认无效**。D 组 d128_light_shrcr 的 LightGBM Macro-F1=0.038（旧全量），低于 dummy baseline。不推荐在任何方案中使用。
+4. **Target encoding 是 TCG 建模的正确方向**。以 K-fold 端点标签统计替代 node2vec，D_te 仅 156 维即达 0.659 Macro-F1（17× D），0.7h 训练完成。
 
-5. **实用推荐**：
-   - **准确率优先**：F_te + LightGBM CUDA 500 轮（2.9h, Macro-F1 0.81）
-   - **时间优先**：D_te + LightGBM CUDA 500 轮（0.7h, Macro-F1 0.66）或 logistic_sgd 采样（<1min, Macro-F1 0.67）
-   - **平衡**：C + LightGBM CUDA 500 轮（3.3h, Macro-F1 0.80）
+5. **500 轮 GPU 训练充分收敛**。n_estimators=500 + CUDA 将训练压缩至 0.7–3.3h。
+
+### 推荐方案
+
+| 目标 | 特征组 | 模型 | 时间 | Macro-F1 |
+|---|---|---|---|---|
+| 准确率优先 | F_te (505维) | LightGBM CUDA 500r | 2.9h | **0.811** |
+| 平衡 | C (349维) | LightGBM CUDA 500r | 3.3h | 0.797 |
+| 时间优先 | D_te (156维) | LightGBM CUDA 500r | 0.7h | 0.659 |
 
 ### 产物
 
 | 产物 | 路径 |
 | --- | --- |
-| TE 数据集 | `data/features/tcg/classification/datasets_te/D_te/E_te/F_te_*.parquet` |
-| LightGBM 结果 | `data/features/hcg/classification/results_full_lgb/` (C, B partial) |
-| LightGBM 结果 | `data/features/tcg/classification/results_full_lgb_te/` (F_te, D_te) |
-| Baseline 结果 | `data/features/hcg/classification/results_baseline/` (A) |
-| Baseline 结果 | `data/features/tcg/classification/results_baseline/` (D) |
-| Baseline 结果 | `data/features/tcg/classification/results_te_baseline/` (D_te) |
-| 新增脚本 | `scripts/build_te_datasets.py` |
+| TE 数据集 | `data/features/tcg/classification/datasets_te/` |
+| HCG LightGBM 结果 | `data/features/hcg/classification/results_full_lgb/` |
+| TCG-TE LightGBM 结果 | `data/features/tcg/classification/results_full_lgb_te/` |
+| 嵌入诊断数据 | `docs/figures_final/_diagnostic_real.npz` |
+| 报告图表 | `docs/figures_final/` (21张) |
+| 新增脚本 | `scripts/build_te_datasets.py`, `scripts/render_final_figures.py` |

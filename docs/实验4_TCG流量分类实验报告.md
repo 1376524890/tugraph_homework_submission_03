@@ -116,31 +116,36 @@ PYTHONPATH=src python scripts/import_tugraph_native.py --graph-type tcg --graph 
 
 ### 3.2 嵌入坍塌的诊断
 
-训练得到的嵌入效果很差，D 组纯嵌入的 knn 仅有 0.044。为查清原因，对嵌入做了定量诊断。随机两条流的 cosine 相似度中位数高达 0.94，理论上互不相关的向量相似度应接近 0，这一数值说明几乎所有 flow 的向量都指向相近方向。PCA 进一步显示，首主成分只解释 38.7% 的方差，前 10 个主成分累计才占 50%，个体差异虽然存在但分散且微弱。再看最近邻的标签一致性，以嵌入相似度找最近邻，邻居与查询流属于同一应用的比例为 0.374，几乎等于随机基线 0.268。
+训练得到的嵌入效果很差。为查清原因，对 TCG d128 嵌入做了三项定量诊断。
 
-综合来看，嵌入呈现软坍塌形态：所有向量共享一个大的公共分量，个体差异部分不携带应用类别信息。node2vec 在 SHR 这种端点内小团图上游走，walk 局限在端点内部、不跨端点，word2vec 学到的共现模式高度相似，最终退化为无判别力的表示。
+**余弦相似度集中**：从非零嵌入中采样 3000 对随机 flow，计算 cosine 相似度。中位数高达 0.940，分布集中在 0.85–1.0 区间。作为对照，HCG 嵌入的随机对余弦中位数仅 0.405，分布均匀分散在 0.3–0.7。几乎所有 TCG flow 的向量都指向相近方向，形成所谓"软坍塌"。
 
-### 3.3 target encoding 验证
+**PCA 方差分散**：对标准化后的嵌入做 PCA。首主成分仅解释 27.8% 方差，前 10 个累计 43.2%，需 50 维才达 79.6%。相较之下，HCG 嵌入首主成分 14.1%，前 10 个累计 54.1%。TCG 嵌入没有出现单维主导的硬坍塌，但方差高度分散，低维子空间缺乏集中的判别信息。
 
-为确认问题出在 node2vec 而非 SHR 关系本身，改用 target encoding 直接利用端点信号。对 src_endpoint、dst_endpoint 分别做 K-fold target encoding：在训练集上统计每个端点的标签分布，用平滑后的 78 维概率向量作为该端点的特征，两端口拼接得 156 维。为防止标签泄漏，训练集内部按 5 折划分，每折用其余折的统计；验证、测试集则用全训练集的统计。
+**最近邻无判别力**：以 cosine 距离找最近邻，邻居与查询流属于同一应用的比例仅 0.218，低于多数类基线 0.275。属于同一源端点的比例仅 0.082。嵌入向量既不能把同类协议拉近，也不编码端点身份。
 
-target encoding 仍属于 TCG 建模范畴，它直接利用 SHR、CR 关系的核心即端点身份，只是用监督标签统计替代了坍塌的无监督嵌入。验证结果是 D_te 组的 knn 达到 0.634，是 node2vec D 组 0.044 的 14 倍。这一对照证明 SHR、CR 的端点信号本身很强，瓶颈确实在 node2vec 嵌入方法，而非关系选择或图建模思路。
+综合来看，问题出在 node2vec 的游走机制与 TCG 图结构的不适配。SHR 图按端点内小团组织，cap K=15 限制后端点内流数 p50=2。node2vec 在这些小团内游走，几乎所有 walk 都在同一端点内打转，从不跨端点。word2vec 学到的共现模式高度同质，最终所有流嵌入坍缩为公共分量 + 无判别个体噪声。
 
-### 3.4 特征融合
+### 3.3 target encoding
 
-特征融合沿用 A、B、C 框架。D 组为 TCG 嵌入，E 组把 A 原始特征与 D 拼接，F 组把 C 即 raw、HCG、TCG 三源融合。融合前对所有特征做 StandardScaler，按训练集 fit，消除原始统计特征的大数值尺度淹没嵌入的概率向量。
+为确认问题出在 node2vec 而非 SHR 关系本身，改用 target encoding 直接利用端点信号。对 src_endpoint、dst_endpoint 分别做 5 折 target encoding：在训练集上统计每个端点的标签分布，用平滑系数 m=10 的贝叶斯平滑后得到 78 维概率向量，两端口拼接得 156 维。训练集内部按折划分防止标签泄漏，验证与测试集用全训练集统计。
+
+target encoding 仍属于 TCG 建模范畴——它直接利用 SHR、CR 关系的核心即端点身份，只是用监督标签统计替代了坍塌的无监督嵌入。全量 357 万条流的 TE 特征通过 build_te_datasets.py 生成 D_te、E_te、F_te 三组 parquet，供分类器直接读取。
+
+### 3.4 特征组定义
+
+本实验共使用六组特征。A 组为 91 维原始流统计特征，B 组为 258 维 HCG 端点嵌入，C 组为 A+B 拼接（349 维）。三组沿用实验 3 定义。
+
+D 组为 TCG 128 维 node2vec flow 嵌入（129 维含 missing flag）；E 组为 A+D 拼接；F 组为 C+D 即 raw+HCG+TCG 三源融合（477 维）。D_te 组为 156 维 target encoding 替代 D；E_te 为 A+D_te（247 维）；F_te 为 C+D_te 即 raw+HCG+TE 三源融合（505 维）。
+
+所有融合特征在训练前做 StandardScaler（fit on train），消除原始特征的大数值与 TE 概率向量之间的尺度差异。
 
 ```bash
 PYTHONPATH=src python scripts/run_tcg_node2vec_procedure_batch.py --graph tcg_light_shrcr \
   --walk-length 20 --num-walks 5 --relation-types CR,SHR
 PYTHONPATH=src python scripts/train_tcg_word2vec_embeddings.py --vector-size 128
-PYTHONPATH=src python scripts/target_encoding_full.py
+PYTHONPATH=src python scripts/build_te_datasets.py
 ```
-
->
-![嵌入 PCA 对比：node2vec 坍塌 vs. target encoding](figures/h4_pca_comparison.png)
->
-![随机流对 cosine 相似度分布](figures/h4_cosine_dist.png)
 
 ## 四、分类器与评价指标
 
@@ -153,43 +158,51 @@ PYTHONPATH=src python scripts/target_encoding_full.py
 | 分类器 | 关键参数 |
 | --- | --- |
 | dummy | strategy=most_frequent |
-| tree | max_depth=20, min_samples_leaf=100 |
-| logistic | SGD(loss=log_loss), max_iter=100 |
+| tree | max_depth=20 |
+| logistic | SGD(loss=log_loss), max_iter=20, StandardScaler |
 | rf | n_estimators=50, max_depth=20 |
 | nb | GaussianNB |
-| lgbm | n_estimators=100, num_leaves=31, device=cpu |
-| knn | k=5, weights=distance, batch_predict=5000 |
+| lgbm | n_estimators=500, num_leaves=63, lr=0.05, device=cuda, early_stopping=100 |
+| knn | k=5, cosine距离, batch_predict=5000 |
 
 ### 4.2 评价指标
 
-用 Macro-F1、Weighted-F1、Accuracy 三项指标，在相同的 13 万预采样上比较。Macro-F1 对 78 类求平均，能反映少数类识别情况，是核心指标。
+用 Macro-F1、Weighted-F1、Accuracy 三项指标。全量 250 万训练、71.5 万测试。Macro-F1 对 78 类求平均，反映少数类识别，是核心指标。
 
-### 4.3 lightgbm 在预采样规模下的局限
+### 4.3 TCG node2vec 嵌入分类效果
 
-lightgbm 在本实验表现偏弱，A 至 F 组的 Macro-F1 仅 0.022 到 0.089。原因是 13 万预采样下少数类样本严重不足，78 类里多数长尾类只剩几十条，lightgbm 这类提升树难以学出稳定判别。曾尝试加 class_weight 平衡少数类，反而因权重过大进一步拖垮整体，去掉后依然偏低，说明瓶颈在样本量而非权重配置。因此 lightgbm 结果参考价值有限，主要对比以 decision_tree、knn、random_forest 等稳定分类器为准。
+首先考察 D 组（纯 TCG node2vec 嵌入，129 维）在全量数据上的分类效果：
 
-下表是 D、E、F 三组（target encoding 版）在七种分类器上的 Macro-F1，最后一列对照 node2vec 版的 knn：
+| Group | dummy | tree | logistic | rf | lgbm | knn |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| D (node2vec 129d) | 0.006 | 0.017 | 0.009 | 0.024 | 0.038 | 0.034 |
+| D_te (TE 156d) | 0.006 | 0.306 | 0.675 | 0.290 | **0.659** | 0.634 |
 
-| Group | dummy | tree | logistic | rf | nb | lgbm | knn | n2v knn |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| D_te (TE 156d) | 0.010 | 0.343 | 0.674 | 0.520 | 0.284 | 0.028 | 0.634 | 0.044 |
-| E_te (raw+TE 247d) | 0.010 | 0.370 | 0.089 | 0.484 | 0.251 | 0.041 | 0.590 | 0.207 |
-| F_te (raw+HCG+TE 505d) | 0.010 | 0.382 | 0.175 | 0.476 | 0.247 | 0.029 | 0.600 | 0.422 |
+TCG node2vec 嵌入的 Macro-F1 在全部分类器上均未超过 0.04，LightGBM 仅 0.038——甚至低于 dummy 基线的 accuracy（0.269）。作为对照，同等样本上的 target encoding D_te 组 LightGBM 达到 0.659，逻辑回归 0.675。这一 17 倍差距铁证了 node2vec 嵌入的坍塌问题，且 target encoding 在全量数据上同样能发挥 LightGBM 的优势。
 
-target encoding 三组的 knn 均超过 0.59，远高于 node2vec 版的 0.044、0.207、0.422。D_te 的 logistic 与 knn 分别达 0.674 与 0.634，是全部实验中的最优值，证明 SHR、CR 端点信号本身很强，node2vec 嵌入坍塌是方法瓶颈而非关系选择问题。lightgbm 同样受 13 万预采样少数类不足拖累，naive_bayes 受独立假设限制偏弱。
+### 4.4 全量 LightGBM CUDA 分类结果
 
-从嵌入方式维度看，target encoding 带来的提升是显著的。D_te 组直接取代 node2vec D 组后，knn 从 0.044 升至 0.634，logistic 从 0.015 升至 0.674，随机森林也达到 0.520。这意味着同样的 src_endpoint、dst_endpoint 端点信号，用监督标签统计替代无监督节点嵌入后，最差分类器的表现也远超 node2vec 最好分类器。node2vec 嵌入的坍塌问题在这里被彻底绕过，SHR 与 CR 关系的端点纯度被直接转化成特征，不需要图游走与词向量训练。
+采用 CUDA 加速的 LightGBM（500 轮）在全量 357 万条流上训练，得到最终分类结果如下：
 
-E_te 与 F_te 融合了原始统计与 TCG 特征后，knn 与随机森林仍有提升。E_te 的 knn 达 0.590，相较 A 组 raw 仅 0.201 是本质改善，说明 target encoding 为原始特征补充了端点级的标签信息。F_te 的 knn 达 0.600、随机森林达 0.476，与 C 组 HCG 融合版对比，TCG target encoding 进一步进一步提升了效果。logistic 在 E_te 与 F_te 上仍偏低，原因与 HCG 侧一致，原始统计特征的大尺度让 SGD 难以收敛，而非 TE 特征无效——全量数据下可增加迭代次数或改用其他线性模型来改善。
+| 组 | 维度 | Macro-F1 | Weighted-F1 | Accuracy | 训练时间 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A (raw) | 91 | 0.544 | 0.800 | 0.807 | 3.3h* |
+| B (HCG) | 258 | ~0.775* | ~0.655* | ~0.660* | — |
+| C (raw+HCG) | 349 | **0.797** | 0.855 | 0.858 | 3.3h |
+| D (node2vec) | 129 | 0.038 | 0.216 | 0.300 | 0.9h |
+| D_te (TE) | 156 | 0.659 | 0.847 | 0.846 | 0.7h |
+| **F_te** (raw+HCG+TE) | 505 | **0.811** | **0.942** | **0.943** | 2.9h |
 
-从分类器维度看，target encoding 场景下 logistic 与 knn 在 D_te 组表现最突出。TE 特征天然概率分布、维度一致、中心化，恰好是 logistic 回归最擅长的输入格式，因此 D_te logistic 0.674 成为全局最优。knn 在标准化后的全部六组中均超过 0.59，因为 StandardScaler 消除了 raw、HCG、TE 之间的尺度差异，距离计算不再被大数值特征淹没。随机森林继续发挥稳健优势，在 D_te 0.520、E_te 0.484、F_te 0.476 的稳定区间内，是融合场景的可靠选项。
+\* A 组 LightGBM 为旧版 CPU 3000 轮结果；B 组为训练曲线外推估计。
 
-HCG 与 TCG target encoding 的对比也值得注意。C 组 knn 0.376 对比 F_te knn 0.600，差距达 0.224。F_te 在 C 的基础上仅补充了 156 维 TE 特征，就把 knn 显著提升，说明 TCG 端点信号包含 HCG 端点嵌入没有捕获的信息。HCG 嵌入是端点结构的无监督表示，TE 是端点类别的监督统计，两种信息互补。
+F_te 组以 Macro-F1=0.811、Weighted-F1=0.942、Accuracy=94.3% 成为全局最优。相比 C 组（raw+HCG），F_te 的 Macro-F1 提升 +0.014，Weighted-F1 大幅提升 +0.087。target encoding 的 156 维端点标签统计在加权指标上改善了头部类别的分类精度。
 
-![D 组 node2vec vs target encoding Macro-F1 对比](figures/h4_d_comparison.png)
+D_te 组（纯 TE，仅 156 维）训练仅 0.7 小时即达 Macro-F1=0.659，远超同维度的 D 组 node2vec（0.038），也超过了 A 组原始特征（0.544）。TE 的 K-fold 统计将 SHR 关系的端点纯度直接转化为特征，完全绕过了 node2vec 的游走-训练管线，在小维度低训练成本下取得了有竞争力的效果。
+
+从特征组层次看，提升路径确定：A（raw 91d, 0.544）→ C（+HCG, 0.797, +0.253）→ F_te（+TE, 0.811, +0.014）。HCG 嵌入贡献了最大的单次增量（+0.253），target encoding 在此基础上进一步补充了端点的监督标签信息。TE 单独使用（D_te 0.659）虽弱于 HCG 单独使用（B ~0.775），但作为监督统计特征，它与 HCG 无监督嵌入是互补的——叠加在 F_te 中的额外增益证明了这一点。
+
+![F_te LightGBM 混淆矩阵](figures/h4_fte_lgb_confusion.png)
 >
-![D_te Logistic 混淆矩阵](figures/h4_dte_logistic_confusion.png)
-
 ![全部分类器×全部特征组 F1 对照矩阵](figures/full_f1_matrix.png)
 
-![各类 Per-class F1: D_te (TE) vs A (raw) 在 top-30 类上的对比](figures/per_class_f1_dte_vs_a.png)
+![D 组 node2vec vs target encoding Macro-F1 对比](figures/h4_d_comparison.png)

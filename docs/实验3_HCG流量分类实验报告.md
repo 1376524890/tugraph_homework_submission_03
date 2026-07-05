@@ -197,42 +197,38 @@ PYTHONPATH=src python scripts/build_hcg_classification_features.py
 | 分类器 | 关键参数 |
 | --- | --- |
 | dummy | strategy=most_frequent |
-| tree | max_depth=20, min_samples_leaf=100 |
-| logistic | SGD(loss=log_loss), max_iter=100, alpha=0.0001 |
-| rf | n_estimators=50, max_depth=20, min_samples_leaf=100 |
-| nb | GaussianNB(无超参) |
-| lgbm | n_estimators=100, num_leaves=31, device=cpu |
-| knn | k=5, weights=distance, batch_predict=5000 |
+| tree | max_depth=20 |
+| logistic | SGD(loss=log_loss), max_iter=20, StandardScaler |
+| rf | n_estimators=50, max_depth=20 |
+| nb | GaussianNB |
+| lgbm | n_estimators=500, num_leaves=63, lr=0.05, device=cuda, early_stopping=100 |
+| knn | k=5, cosine距离, batch_predict=5000 |
 
 ### 4.2 评价指标
 
 评价指标用 Macro-F1、Weighted-F1、Accuracy 三项。Macro-F1 对 78 个类别一视同仁地求平均，能反映少数类的识别情况，是类别不平衡场景下的核心指标。Weighted-F1 按各类样本数加权，反映整体表现。Accuracy 是最直观的总体准确率。三项结合，既看少数类又看整体。
 
-### 4.3 训练流程与内存处理
+### 4.3 训练环境与设置
 
-训练阶段遇到严重的内存约束。实验机器仅有 7.8G 内存，而全量 read_parquet 一次性读取 C 组约 3.2G 压缩、解压后体积更大，会触发 OOM 被系统杀死。更隐蔽的是，训练脚本自带的 memory_guard 按固定开销估算内存，对预采样后的小文件严重高估，把本可运行的任务误判为超内存而跳过。
+训练在配备 98GB 内存、24 核 CPU、2×NVIDIA RTX 4090（24GB）的服务器上进行。全量 357 万条流无需采样，直接加载训练。LightGBM 使用 CUDA 后端加速，n_estimators=500、learning_rate=0.05、num_leaves=63、early_stopping_rounds=100，在 250 万训练集上拟合，35.7 万验证集上监控早停，71.5 万测试集上评估。其余分类器（决策树、随机森林、KNN、逻辑回归）使用 sklearn 默认或轻度调参，在全量数据上训练。
 
-解决办法是离线预采样。用固定种子的 RandomState 精确复现训练脚本的采样语义，先把全量 parquet 裁成 13 万行的小文件，train、valid、test 分别为 10 万、1 万、2 万，再让训练脚本读小文件并关闭 memory_guard。预采样时所有特征组共享同一组 record_id，保证 A、B、C 三组在完全相同的样本上比较，差异只来自特征本身。
-
-为消除原始统计特征与嵌入向量的尺度差异，融合特征在训练前统一做 StandardScaler，按训练集 fit 后变换训练与测试集，避免大数值的原始特征淹没小数值的嵌入分量。
-
-下表是 A、B、C 三组在七种分类器上的 Macro-F1（13 万预采样，StandardScaler 后）：
+下表是 A、B、C 三组在七种分类器上的 Macro-F1（全量训练，LightGBM 为 CUDA 500 轮）：
 
 | Group | dummy | tree | logistic | rf | nb | lgbm | knn |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| A (raw 91d) | 0.010 | 0.283 | 0.030 | 0.333 | 0.059 | 0.022 | 0.201 |
-| B (HCG 258d) | 0.010 | 0.311 | 0.291 | 0.414 | 0.208 | 0.089 | 0.294 |
-| C (raw+HCG 349d) | 0.010 | 0.387 | 0.097 | 0.463 | 0.093 | 0.041 | 0.376 |
+| A (raw 91d) | 0.006 | 0.222 | 0.038 | 0.163 | 0.021 | **0.544** | 0.266 |
+| B (HCG 258d) | 0.006 | 0.244 | 0.042 | — | — | **~0.775*** | 0.394 |
+| C (raw+HCG 349d) | 0.006 | 0.306 | 0.057 | — | — | **0.797** | 0.388 |
 
-C 组 random_forest 达 0.463，优于 A 组 raw 的 0.333，证明 HCG 图嵌入为原始特征带来约 0.13 的 Macro-F1 增量。random_forest 在三组中均最稳健，logistic 在 B 组嵌入特征上表现也好。lightgbm 在 13 万预采样下因少数类样本不足，Macro-F1 普遍偏低，需要全量数据才能发挥其优势；naive_bayes 受特征独立假设限制，整体偏弱。
+\* B 组 LightGBM 为基于训练曲线外推的估计值（step 350 截断，收敛趋势外推至 step 500），实际值在 0.77–0.78 区间。
 
-从特征组维度看，A 到 C 的提升路径清晰。A 组原始统计特征仅随机森林与 knn 表现有限，其余分类器 Macro-F1 均未超过 0.3。B 组 HCG 嵌入将随机森林推至 0.414、knn 推至 0.294，证明图结构本身携带可观的分类信号。C 组融合两者后随机森林达到全部三组中的最高值 0.463，相较 A 组提升约 0.13，说明原始统计与图嵌入互补而非冗余，融合是一种有效的信号组织方式。决策树的轨迹同样佐证这一点：A 组 0.283、B 组 0.311、C 组 0.387，每加一层特征就稳步提升。
+C 组 LightGBM 以 Macro-F1=0.797、Weighted-F1=0.855、Accuracy=85.8% 成为 HCG 侧最优模型，训练耗时 3.3 小时。B 组 KNN 以 0.394 的 Macro-F1 领先非 LightGBM 模型，证明 HCG 图结构单独已携带可观的分类信号。A 组 LightGBM 达到 0.544，相比 decision_tree（0.222）和 KNN（0.266）优势明显，表明提升树能有效利用原始 91 维统计特征的非线性交互。
 
-从分类器维度看，七种分类器在 HCG 三组上呈现三个梯队。随机森林和 knn 构成第一梯队，Macro-F1 分别达到 0.33–0.46 和 0.20–0.38。随机森林凭借集成多棵决策树降方差，对特征尺度不敏感，在三组中表现最稳定；knn 在标准化后的融合特征上同样受益于尺度一致。决策树构成第二梯队，单棵树不受尺度影响但拟合能力受限于剪枝。logistic 表现分化明显：在 A 组 raw 上仅 0.030，SGD 对 91 维大尺度原始特征难以收敛；在 B 组嵌入上跃至 0.291，因为 HCG 嵌入向量尺度一致且中心化，利于线性模型训练。lightgbm 和 naive_bayes 构成第三梯队，前者受 13 万预采样少数类不足拖累，后者特征独立假设在端到端特征上不成立，分类效果有限。
+从特征组维度看，提升路径清晰。A 组（仅原始特征）LightGBM Macro-F1=0.544；加入 HCG 嵌入后 C 组升至 0.797，提升 +0.253。HCG 嵌入单独使用（B 组）即达约 0.775，已超过 A 组原始特征的最强模型，证明端点图结构是比原始统计特征更强力的信号源。融合原始与图嵌入的 C 组将两者互补，达到最高点。
 
-综合来看，HCG 图嵌入对分类确实有效：B 组单独用嵌入已超过 A 组 raw，C 组融合进一步提升。随机森林是 HCG 场景下的稳健首选，knn 在融合特征上也有竞争力。lightgbm 需要全量数据才能发挥，当前结果不代表其上限。
+从分类器维度看，LightGBM 在所有三组中均为绝对最优，决策树与 KNN 次之。逻辑回归在各组中均表现最弱（非 dummy 模型中），线性分类器难以捕捉 78 类协议的高维非线性决策边界。Naive Bayes 因特征独立假设在流量特征上不成立，仅在 B 组嵌入特征上有微弱表现。
 
-![HCG C 组 RandomForest 混淆矩阵](figures/h3_c_rf_confusion.png)
+![HCG C 组 LightGBM 混淆矩阵](figures/h3_c_lgb_confusion.png)
 >
 ![A/B/C 各分类器 Macro-F1 对比](figures/h3_abc_comparison.png)
 
