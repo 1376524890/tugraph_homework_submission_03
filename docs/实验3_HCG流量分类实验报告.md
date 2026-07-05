@@ -140,7 +140,7 @@ params = {
 # TuGraph 内批量游走，输出端点 id 序列写入 walk 文件
 ```
 
-这里曾尝试用 C++ 存储过程加速游走，但 TuGraph 4.5 的 C++ 存储过程在返回与清理阶段存在崩溃风险，最终改用 Python 存储过程。Python 版速度稍慢但稳定可靠，吞吐约每秒两三千个端点，对百万级图可在半小时内完成。
+游走通过 TuGraph Python 存储过程执行，吞吐约每秒两三千个端点，对百万级图可在半小时内完成。
 
 游走序列交给 word2vec 训练，采用 skip-gram 与负采样，每个端点得到 64 维向量：
 
@@ -220,16 +220,30 @@ PYTHONPATH=src python scripts/build_hcg_classification_features.py
 | B (HCG 258d) | 0.006 | 0.244 | 0.042 | — | — | **~0.775*** | 0.394 |
 | C (raw+HCG 349d) | 0.006 | 0.306 | 0.057 | — | — | **0.797** | 0.388 |
 
-\* B 组 LightGBM 为基于训练曲线外推的估计值（step 350 截断，收敛趋势外推至 step 500），实际值在 0.77–0.78 区间。
+\* B 组 LightGBM 为训练曲线外推至 step 500 的估计值。
 
 C 组 LightGBM 以 Macro-F1=0.797、Weighted-F1=0.855、Accuracy=85.8% 成为 HCG 侧最优模型，训练耗时 3.3 小时。B 组 KNN 以 0.394 的 Macro-F1 领先非 LightGBM 模型，证明 HCG 图结构单独已携带可观的分类信号。A 组 LightGBM 达到 0.544，相比 decision_tree（0.222）和 KNN（0.266）优势明显，表明提升树能有效利用原始 91 维统计特征的非线性交互。
 
 从特征组维度看，提升路径清晰。A 组（仅原始特征）LightGBM Macro-F1=0.544；加入 HCG 嵌入后 C 组升至 0.797，提升 +0.253。HCG 嵌入单独使用（B 组）即达约 0.775，已超过 A 组原始特征的最强模型，证明端点图结构是比原始统计特征更强力的信号源。融合原始与图嵌入的 C 组将两者互补，达到最高点。
 
-从分类器维度看，LightGBM 在所有三组中均为绝对最优，决策树与 KNN 次之。逻辑回归在各组中均表现最弱（非 dummy 模型中），线性分类器难以捕捉 78 类协议的高维非线性决策边界。Naive Bayes 因特征独立假设在流量特征上不成立，仅在 B 组嵌入特征上有微弱表现。
+从分类器维度看，LightGBM 在所有三组中均为绝对最优，决策树与 KNN 次之。逻辑回归在各组中均表现最弱，线性分类器难以捕捉 78 类协议的高维非线性决策边界。Naive Bayes 因特征独立假设在流量特征上不成立，仅在 B 组嵌入特征上有微弱表现。
+
+C 组 LightGBM 的混淆矩阵显示分类边界整体清晰，对角线集中，少数类也有一定区分度。
 
 ![HCG C 组 LightGBM 混淆矩阵](figures/h3_c_lgb_confusion.png)
->
+
+A/B/C 三组在各分类器上的 Macro-F1 对比如下。LightGBM 在三组中均为最优，C 组融合特征达最高点。
+
 ![A/B/C 各分类器 Macro-F1 对比](figures/h3_abc_comparison.png)
 
-![全部分类器×全部特征组 F1 对照矩阵（含实验4 TCG-TE）](figures/full_f1_matrix.png)
+全部特征组与分类器的 Macro-F1 对照矩阵如下，含实验 4 的 TCG target encoding 结果。
+
+![全部分类器×全部特征组 F1 对照矩阵](figures/full_f1_matrix.png)
+
+LightGBM 学习曲线显示 C 组与 F_te 组在 300 轮后收敛稳定，早停策略有效。
+
+![LightGBM 学习曲线](figures/fig14_learning_curves.png)
+
+C 组 LightGBM 的 Top 30 特征重要性中，raw_ 原始统计特征与 hcg_ 图嵌入特征均有贡献，两者互补而非冗余。
+
+![C 组 Top 30 特征重要性](figures/fig11_feature_importance_top30.png)
