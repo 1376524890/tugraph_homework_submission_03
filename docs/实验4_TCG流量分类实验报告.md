@@ -93,7 +93,7 @@ PYTHONPATH=src python scripts/import_tugraph_native.py --graph-type tcg --graph 
 
 >
 
-### 2.6 TCG 图及嵌入参数
+### 2.7 TCG 图及嵌入参数
 
 | 参数 | 值 |
 | --- | ---: |
