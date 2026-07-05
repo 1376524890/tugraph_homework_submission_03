@@ -3643,6 +3643,37 @@ D/E/F 训练（预采样 13 万行，跳过 lightgbm，`--no-memory-guard`）对
 - [ ] 预采样 + 训练评估（D 组 knn Macro-F1 对比 0.034）
 - [x] 上传 ModelScope + 结果回填（D/E/F d128_light_shrcr 已上传到 MarkTom/IP-Network-Flow-Graph）
 
+## 2026-07-05 实验报告文档修订与图表系统
+
+### 报告文档修订
+
+- 全文"作业"→"实验"，删除未补截图引用（共 16 处）
+- 结果表列名缩短（tree/rf/nb/lgbm/knn/n2v knn），防 PDF 页面溢出
+- 添加三线表参数表：HCG 图参数（2.5）、TCG 图参数（2.6）、分类器超参（4.1）
+- Pandoc 转 PDF 加 `--listings` + `\lstset{breaklines=true}` 解决代码块超宽
+- 混淆矩阵 colormap 改为莫兰迪蓝红 `LinearSegmentedColormap("morandi_rb")`
+- PDF 用 pandoc+xelatex+Noto Serif CJK SC 生成
+
+### F1 数据缓存（避免重复训练）
+
+`scripts/plot_full_f1_matrix.py` 训练完成后将 Macro-F1 / Weighted-F1 / Accuracy 矩阵写入 `data/features/reports/f1_cache.json`，后续 `generate_report_figures.py` 等绘图脚本优先读取缓存，跳过 K-fold target encoding 与全分类器训练（省约 15 分钟）。
+
+缓存结构：`{"macro": {...}, "weighted": {...}, "accuracy": {...}}`，键为 `"{group}_{model}"`。
+
+### 新增图表
+
+| 图 | 脚本 | 说明 |
+|---|---|---|
+| `full_f1_matrix.png` | plot_full_f1_matrix.py | 6特征组×6分类器 Macro-F1/Weighted-F1 双栏 heatmap |
+| `per_class_f1_dte_vs_a.png` | plot_full_f1_matrix.py | D_te vs A 各类 Per-class F1 (top-30) |
+| `train_time_comparison.png` | generate_report_figures.py | 各特征组各分类器训练时间对比 |
+| `h3_rf_importance.png` | generate_report_figures.py | RF 在 C 组上的 Top-20 特征重要性 |
+| `best_macro_f1_ranking.png` | generate_report_figures.py | 各特征组最高 Macro-F1 排名 |
+
+### 一键脚本集成
+
+`run_hcg_classification_all.sh` 已集成 rf/nb 模型、新版 TCG 数据下载（d128_shrcr，自动清理旧 d64）、target encoding 验证步骤（Step 6）。详见 commit `626a168`。
+
 ## 2026-07-04 target encoding 验证：保持 TCG 建图思路，证明 node2vec 坍塌
 
 ### 背景

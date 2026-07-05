@@ -1,0 +1,11 @@
+{
+  "macro": {
+    "A_dummy": 0.01,
+    "A_tree": 0.283,
+    "D_te_logistic": 0.674
+  },
+  "weighted": {
+    "A_dummy": 0.111,
+    "D_te_knn": 0.77
+  }
+}

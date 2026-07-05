@@ -181,3 +181,7 @@ HCG 与 TCG target encoding 的对比也值得注意。C 组 knn 0.376 对比 F_
 ![D 组 node2vec vs target encoding Macro-F1 对比](figures/h4_d_comparison.png)
 >
 ![D_te Logistic 混淆矩阵](figures/h4_dte_logistic_confusion.png)
+
+![全部分类器×全部特征组 F1 对照矩阵](figures/full_f1_matrix.png)
+
+![各类 Per-class F1: D_te (TE) vs A (raw) 在 top-30 类上的对比](figures/per_class_f1_dte_vs_a.png)
