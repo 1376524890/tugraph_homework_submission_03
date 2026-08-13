@@ -16,6 +16,12 @@ data/features/tcg/node2vec/*.model
 data/features/tcg/node2vec/*.model.*
 data/features/tcg/classification/datasets*/
 data/features/tcg/classification/results*/
+# 方案B最终结果（results_full_lgb_te/）仅同步轻量结果（指标/报告/图表），
+# 排除 model.pkl / lightgbm_model.txt / scaler.pkl 等大模型文件（>100MB 会超 GitHub 限制）
+!data/features/tcg/classification/results_full_lgb_te/
+data/features/tcg/classification/results_full_lgb_te/**/*.pkl
+data/features/tcg/classification/results_full_lgb_te/**/lightgbm_model.txt
+data/features/tcg/classification/results_full_lgb_te/**/scaler.pkl
 runs/hcg_classification*/
 runs/tcg_classification*/
 docker/tugraph-data/
